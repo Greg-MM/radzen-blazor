@@ -1,0 +1,247 @@
+﻿@using Radzen
+@using System.Linq
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.JSInterop
+@using Microsoft.AspNetCore.Components.Rendering
+@typeparam TValue
+@inherits DropDownBase<TValue>
+
+@if (Visible)
+{
+    <!--<div @ref="@Element" @attributes="Attributes" class="@GetCssClass()" onmousedown="Radzen.activeElement = null" @onclick="@(args => OpenPopup("ArrowDown", false, true))" @onclick:preventDefault @onclick:stopPropagation style="@Style" tabindex="@(Disabled ? "-1" : $"{TabIndex}")"
+         @onkeydown="@((args) => OnKeyPress(args))" id="@GetId()"  @onfocus="@((args) => OnFocus(args))">
+        <div class="rz-helper-hidden-accessible">
+            <input disabled="@Disabled" aria-haspopup="listbox" readonly="" type="text" tabindex="-1"
+                   name="@Name" value="@(internalValue != null ? internalValue : "")" id="@Name"
+                   aria-label="@(!Multiple && internalValue != null ? internalValue : EmptyAriaLabel)" @attributes="InputAttributes"/>
+        </div>
+
+        @if (ValueTemplate != null && selectedItem != null)
+        {
+            <span class="rz-dropdown-label rz-inputtext" style="width:100%;" @onkeydown:stopPropagation>
+                @ValueTemplate(selectedItem)
+            </span>
+        }
+        else if (Template != null && selectedItem != null)
+        {
+            <span class="rz-dropdown-label rz-inputtext" @onkeydown:stopPropagation>
+                @Template(selectedItem)
+            </span>
+        }
+        else if (selectedItem != null && !Multiple)
+        {
+            <span class="rz-dropdown-label rz-inputtext">
+                @GetItemOrValueFromProperty(selectedItem, TextProperty)
+            </span>
+        }
+        else if (Chips && selectedItems.Count > 0 && selectedItems.Count < MaxSelectedLabels)
+        {
+            <div class="rz-dropdown-chips-wrapper">
+                @foreach (var item in selectedItems)
+                {
+                    <div class="rz-chip">
+                        <span class="rz-chip-text" @onkeydown:stopPropagation>
+                            @if(ValueTemplate != null)
+                            {
+                                @ValueTemplate(item)
+                            }
+                            else if(Template != null)
+                            {
+                                @Template(item)
+                            }
+                            else
+                            {
+                                @GetItemOrValueFromProperty(item, TextProperty)
+                            }
+                        </span>
+                        <button tabindex="0" title="@(RemoveChipTitle + " " + GetItemOrValueFromProperty(item, TextProperty))" type=button class="rz-button rz-button-sm rz-button-icon-only rz-base rz-shade-default @(Disabled ?"rz-state-disabled":"")" @onclick:preventDefault @onclick:stopPropagation @onclick="() => OnChipRemove(item)"><RadzenIcon Icon="close" /></button>
+                    </div>
+                }
+            </div>
+        }
+        else if (selectedItems.Count > 0)
+        {
+            <span class="rz-dropdown-label rz-inputtext" @onkeydown:stopPropagation>
+                @if (selectedItems.Count < MaxSelectedLabels)
+                {
+                    @if (Template == null && ValueTemplate == null)
+                    {
+                        @(string.Join(Separator, selectedItems.Select(i => GetItemOrValueFromProperty(i, TextProperty))))
+                    }
+                    else
+                    {
+                        var last = selectedItems.LastOrDefault();
+
+                        foreach (var item in selectedItems)
+                        {
+                            if (ValueTemplate != null)
+                            {
+                                @ValueTemplate(item)
+                            }
+                            else if (Template != null)
+                            {
+                                @Template(item)
+                            }
+                            @(item != last ? Separator : "")
+                        }
+                    }
+                }
+                else
+                {
+                    @($"{selectedItems.Count} {SelectedItemsText}")
+                }
+            </span>
+        }
+        else if (!string.IsNullOrEmpty(Placeholder))
+        {
+            <span class="rz-dropdown-label rz-inputtext rz-placeholder">
+                @Placeholder
+            </span>
+        }
+        else
+        {
+            <span class="rz-dropdown-label rz-inputtext">
+                &nbsp;
+            </span>
+        }
+
+        <div class="rz-dropdown-trigger rz-corner-right">
+            <span class="notranslate rz-dropdown-trigger-icon rzi rzi-chevron-down"></span>
+        </div>
+
+        <div id="@PopupID" class="@(Multiple ? "rz-multiselect-panel" : "rz-dropdown-panel")"
+             style="display:none; box-sizing: border-box">
+            @if(!Multiple && (AllowFiltering || HeaderTemplate != null))
+            {
+                @if (HeaderTemplate != null)
+                {
+                    @HeaderTemplate
+                }
+                else
+                {
+                    @RenderFilter()
+                }
+            }
+            @if (Multiple && (AllowSelectAll || AllowFiltering || HeaderTemplate != null))
+            {
+                @if (HeaderTemplate != null)
+                {
+                    @HeaderTemplate
+                }
+                else
+                {
+                <div class="rz-multiselect-header rz-helper-clearfix" @onclick:preventDefault>
+                    @if(AllowSelectAll && Data != null && Data.Cast<object>().Any())
+                    {
+                    <div class="rz-chkbox" title="@(!AllowFiltering ? "" : SelectAllText)" @onclick="@SelectAll">
+                        <div class="rz-helper-hidden-accessible">
+                            <input readonly="readonly" type="checkbox" id="@($"{(Name ?? UniqueID + "sa")}")" aria-label="@SearchAriaLabel" aria-checked="@(IsAllSelected().ToString().ToLowerInvariant())">
+                        </div>
+                        <div class="@(IsAllSelected() ? "notranslate rz-chkbox-box rz-state-active" : "notranslate rz-chkbox-box")">
+                            <span class="@(IsAllSelected() ? "notranslate rz-chkbox-icon rzi rzi-check" : "notranslate rz-chkbox-icon")"></span>
+                        </div>
+                    </div>
+                    }
+                    @if (AllowSelectAll && !AllowFiltering && !string.IsNullOrEmpty(SelectAllText) && Data != null && Data.Cast<object>().Any())
+                    {
+                        <span style="cursor:pointer" @onclick="@SelectAll">@SelectAllText</span>
+                    }
+                    @if (AllowFiltering)
+                    {
+                        <div class="rz-multiselect-filter-container">
+                            <input id="@SearchID" tabindex="@(Disabled ? "-1" : $"{TabIndex}")" class="rz-inputtext" role="textbox" type="text"
+                                   onclick="Radzen.preventDefaultAndStopPropagation(event)" aria-label="@SearchAriaLabel"
+                                   @ref="@search" @oninput=@(args => { searchText = $"{args.Value}"; SearchTextChanged.InvokeAsync(searchText);})
+                                   @onchange="@((args) => OnFilter(args))" @onkeydown="@((args) => OnFilterKeyPress(args))" value="@searchText" autocomplete="@FilterAutoCompleteType" />
+                            <span class="notranslate rz-multiselect-filter-icon rzi rzi-search"></span>
+                        </div>
+                    }
+                    <a id="@(GetId() + "clear")" class="rz-multiselect-close " @onclick="@ClearAll" @onclick:stopPropagation="true">
+                        <span class="notranslate rzi rzi-times"></span>
+                    </a>
+                </div>
+                }
+            }
+            <div class="@(Multiple ? "rz-multiselect-items-wrapper" : "rz-dropdown-items-wrapper")" style="@PopupStyle">
+                @if (Data != null && Data.Cast<object>().Any())
+                {
+                    <ul @ref="list" class="@(Multiple ? "rz-multiselect-items rz-multiselect-list" : "rz-dropdown-items rz-dropdown-list")" role="listbox">
+                        @if (View != null)
+                        {
+                            @RenderItems()
+                        }
+                    </ul>
+                }
+                else
+                {
+                    @EmptyTemplate
+                }
+            </div>
+        </div>
+        @if (AllowClear && (!Multiple && HasValue || Multiple && selectedItems.Count > 0))
+        {
+            <i class="notranslate rz-dropdown-clear-icon rzi rzi-times" @onclick="@ClearAll" @onclick:stopPropagation="true"></i>
+        }
+    </div>-->
+
+	<div @ref="@Element" style="@($"{Style};display:inline-block;")" @attributes="Attributes" class="@GetCssClass()" id="@GetId()">
+		
+        <input @ref="@search" @attributes="InputAttributes" @onkeydown="@OnFilterKeyPress" value="@Value" disabled="@Disabled"
+            tabindex="@(Disabled ? "-1" : $"{TabIndex}")" @onchange="@OnChange" onfocus="@(OpenOnFocus ? OpenScript() : null)"
+			@oninput=@(async args => { searchText = $"{args.Value}"; await SearchTextChanged.InvokeAsync(searchText); await JSRuntime.InvokeVoidAsync("Radzen.openPopup", Element, PopupID, true); })
+            aria-autocomplete="list" aria-haspopup="true" autocomplete="off" role="combobox"
+            class="@InputClassList" onblur="Radzen.activeElement = null"
+            type="@InputType" id="@Name" aria-expanded="true" placeholder="@CurrentPlaceholder" maxlength="@MaxLength" />
+
+        <div id="@PopupID" class="rz-autocomplete-panel" style="@PopupStyle">
+            <ul @ref="@list" class="rz-autocomplete-items rz-autocomplete-list" role="listbox">
+                @if (!string.IsNullOrEmpty(searchText) || !string.IsNullOrEmpty(customSearchText))
+                {
+                    @foreach (var item in LoadData.HasDelegate ? Data != null ? Data : Enumerable.Empty<object>() : (View != null ? View : Enumerable.Empty<object>()))
+                    {
+                        <li role="option" class="rz-autocomplete-list-item" @onclick="@(() => OnSelectItem(item))" onmousedown="Radzen.activeElement = null">
+                            <span>
+                                @if (Template != null)
+                                {
+                                    @Template(item)
+                                }
+                                else
+                                {
+                                    @PropertyAccess.GetItemOrValueFromProperty(item, TextProperty)
+                                }
+                            </span>
+                        </li>
+                    }
+                }
+            </ul>
+        </div>
+    </div>
+}
+@code {
+    internal RenderFragment RenderFilter()
+    {
+#if NET7_0_OR_GREATER
+        return __builder => {
+            <text>
+                <div class="rz-dropdown-filter-container">
+                    <input aria-label="@SearchAriaLabel" id="@SearchID" @ref="@search" tabindex="@(Disabled ? "-1" : $"{TabIndex}")" placeholder="@FilterPlaceholder" class="rz-dropdown-filter rz-inputtext" autocomplete="@FilterAutoCompleteType" aria-autocomplete="none" type="text"
+                           @onchange="@OnFilter" @onkeydown="@OnFilterKeyPress"
+                           @bind:event="oninput" @bind:get="searchText" @bind:set="@(args => { searchText = $"{args}"; SearchTextChanged.InvokeAsync(searchText);})" />
+                    <span class="notranslate rz-dropdown-filter-icon rzi rzi-search"></span>
+                </div>
+            </text>
+        };
+#else
+        return __builder => {
+            <text>
+                <div class="rz-dropdown-filter-container">
+                    <input aria-label="@SearchAriaLabel" id="@SearchID" @ref="@search" tabindex="@(Disabled ? "-1" : $"{TabIndex}")" placeholder="@FilterPlaceholder" class="rz-dropdown-filter rz-inputtext" autocomplete="@FilterAutoCompleteType" aria-autocomplete="none" type="text"
+                           @onchange="@OnFilter" @onkeydown="@OnFilterKeyPress" value="@searchText"
+                           @oninput="@((ChangeEventArgs args) => { searchText = $"{args.Value}"; SearchTextChanged.InvokeAsync(searchText);})" />
+                    <span class="notranslate rz-dropdown-filter-icon rzi rzi-search"></span>
+                </div>
+            </text>
+        };
+#endif
+    }
+}

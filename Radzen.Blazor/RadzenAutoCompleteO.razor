@@ -1,0 +1,51 @@
+﻿@using Radzen
+@using Radzen.Blazor.Rendering
+@using System.Collections
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.JSInterop
+@typeparam TValue
+@inherits DataBoundFormComponent<TValue>
+
+@if (Visible)
+{
+    <div @ref="@Element" style="@($"{Style};display:inline-block;")" @attributes="Attributes" class="@GetCssClass()" id="@GetId()">
+        @if (Multiline)
+        {
+            <textarea @ref="@search" @attributes="InputAttributes" @onkeydown="@OnFilterKeyPress" value="@TextValue" disabled="@Disabled"
+                oninput="@OpenScript()" tabindex="@(Disabled ? "-1" : $"{TabIndex}")"  @onchange="@OnChange" onfocus="@(OpenOnFocus ? OpenScript() : null)"
+                aria-autocomplete="list" aria-haspopup="true" autocomplete="off" role="combobox"
+                class="@InputClassList" onblur="Radzen.activeElement = null"
+                id="@Name" aria-expanded="true" placeholder="@CurrentPlaceholder" maxlength="@MaxLength" />
+        }
+        else
+        {
+            <input @ref="@search" @attributes="InputAttributes" @onkeydown="@OnFilterKeyPress" value="@TextValue" disabled="@Disabled"
+                oninput="@OpenScript()" tabindex="@(Disabled ? "-1" : $"{TabIndex}")" @onchange="@OnChange" onfocus="@(OpenOnFocus ? OpenScript() : null)"
+                aria-autocomplete="list" aria-haspopup="true" autocomplete="off" role="combobox"
+                class="@InputClassList" onblur="Radzen.activeElement = null"
+                type="@InputType" id="@Name" aria-expanded="true" placeholder="@CurrentPlaceholder" maxlength="@MaxLength" />
+        }
+        <div id="@PopupID" class="rz-autocomplete-panel" style="@PopupStyle">
+            <ul @ref="@list" class="rz-autocomplete-items rz-autocomplete-list" role="listbox">
+                @if (!string.IsNullOrEmpty(searchText) || !string.IsNullOrEmpty(customSearchText))
+                {
+                    @foreach (TValue item in LoadData.HasDelegate ? Data != null ? Data : Enumerable.Empty<TValue>() : (View != null ? View : Enumerable.Empty<TValue>()))
+                    {
+                        <li role="option" class="rz-autocomplete-list-item" @onclick="@(() => OnSelectItem(item))" onmousedown="Radzen.activeElement = null">
+                            <span>
+                                @if (Template != null)
+                                {
+                                    @Template(item)
+                                }
+                                else
+                                {
+                                    @PropertyAccess.GetItemOrValueFromProperty(item, TextProperty)
+                                }
+                            </span>
+                        </li>
+                    }
+                }
+            </ul>
+        </div>
+    </div>
+}
