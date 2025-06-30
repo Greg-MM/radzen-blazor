@@ -233,6 +233,12 @@ video {
 .components-list {
     --rz-link-hover-text-decoration: none;
 
+    .rz-link-disabled
+    {
+        pointer-events: none;
+        opacity: 0.5;
+    }
+
     .rz-link {
         display: block;
         width: 100%;
@@ -297,7 +303,29 @@ video {
     }
 }
 
+/* Main Site Navigation on Product pages */
 
+.site-main-top-nav {
+    --rz-menu-item-icon-margin-inline: 0;
+    --rz-menu-item-icon-color: var(--rz-on-primary-darker);
+    --rz-menu-item-icon-hover-color: var(--rz-white);
+    --rz-menu-background-color: var(--rz-base-darker);
+    --rz-menu-top-item-color: var(--rz-on-base-darker);
+    --rz-menu-top-item-background-color: var(--rz-base-darker);
+    --rz-menu-top-item-hover-color: var(--rz-on-base-darker);
+    --rz-menu-top-item-selected-color: var(--rz-on-base-darker);
+    --rz-menu-item-color: var(--rz-on-base-darker);
+    --rz-menu-item-background-color: var(--rz-base-darker);
+    --rz-menu-item-hover-color: var(--rz-on-base-dark);
+    --rz-menu-item-hover-background-color: var(--rz-base-dark);
+    --rz-menu-item-selected-color: var(--rz-on-base-darker); 
+    --rz-menu-item-selected-background-color: var(--rz-base-dark);
+}
+
+.rz-material3 .demos-nav,
+.rz-material3-dark .demos-nav  {
+    padding: 0.5rem;
+}
 
 /* Footer */
 
@@ -418,45 +446,14 @@ svg.illustration {
 .demos-right-nav {
     position: sticky;
     inset-block-start: 2rem;
-    border-inline-start: var(--rz-border-disabled);
 }
 
-.article-toc {
-    border-inline-start: var(--rz-border-disabled);
-}
+/* Promo */
 
-.article-toc h2 {
-    padding-inline-start: calc(1rem + 2px);
-}
-
-.article-toc ul,
-.article-toc li {
-    margin: 0;
-    padding: 0;
-    list-style-type: none;
-}
-
-.article-toc a {
-    display: block;
-    padding: 0.25rem 0.25rem 0.25rem 1rem;
-    text-decoration: none;
-    color: var(--rz-tabs-tab-color);
-    border-inline-start: 2px solid transparent;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    transition: var(--rz-transition-all);
-}
-
-.article-toc .active a {
-    color: var(--rz-tabs-tab-selected-color);
-    border-inline-start-color: var(--rz-tabs-tab-selected-color);
-}
-
-.article-toc a:hover,
-.article-toc .active a:hover {
-    text-decoration: none;
-    color: var(--rz-tabs-tab-hover-color);
-    border-inline-start-color: var(--rz-tabs-tab-hover-color);
+.promo-alert {
+    background: linear-gradient(110deg, rgba(0,0,0,0.4) 100%, rgba(0,0,0,0.3) 30%, rgba(0,0,0,0.4) 100%),linear-gradient(110deg, #000 20%, #AA01E4 75%, #534EEB 100%);
+    background-size: cover;
+    padding: 2rem !important;
 }
 
 /* Responsive */

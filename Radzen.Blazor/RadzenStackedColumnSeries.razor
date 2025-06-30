@@ -29,12 +29,27 @@
                 var radius = Chart.ColumnOptions.Radius;
                 var y0 = GetColumnBottom(data, columnIndex, category, stackedColumnSeries);
 
+                if (itemValue < 0)
+                {
+                    (y, y0) = (y0, y);
+                }
+
                 if (radius > 0)
                 {
                     var height = Math.Abs(y0 - y);
-                    var items = stackedColumnSeries.SelectMany(series => series.ItemsForCategory(category(data))).ToList();
+
+                    var items = stackedColumnSeries.SelectMany(series => series.ItemsForCategory(category(data))).OfType<TItem>()
+                        .Where(item =>
+                        {
+                            var value = Value(item);
+                            return itemValue >= 0 ? value >= 0 : value < 0;
+                        }).ToList();
+
                     var index = items.IndexOf(data);
-                    if (radius > width / 2 || index < items.Count - 1 || radius > height)
+
+                    var nextValue = (index < items.Count - 1) ? Value(items[index + 1]) : 0;
+
+                    if (radius > width / 2 || (index < items.Count - 1 && nextValue != 0) || radius > height)
                     {
                         radius = 0;
                     }

@@ -130,11 +130,20 @@ namespace Radzen.Blazor
                 }
             }
 
+            private string GetPath()
+            {
+                var uri = new Uri(NavigationManager.Uri);
+
+                var anchor = GetAnchor();
+
+                return $"{uri.PathAndQuery}#{anchor}";
+            }
+
             protected override void BuildRenderTree(RenderTreeBuilder builder)
             {
                 builder.OpenElement(1, "a");
-                builder.AddAttribute(2, "name", GetAnchor());
-                builder.AddAttribute(3, "href", Path);
+                builder.AddAttribute(2, "id", GetAnchor());
+                builder.AddAttribute(3, "href", GetPath());
                 builder.AddAttribute(4, "class", "rz-link");
                 builder.AddAttribute(5, "target", "_top"); // To support relative links without the Blazor router interfering
                 builder.AddElementReferenceCapture(6, capture => element = capture);
@@ -339,16 +348,17 @@ namespace Radzen.Blazor
                     break;
             }
 
-            var classList = ClassList.Create(className)
-                                     .Add(Attributes)
-                                     .Add(alignClassName, TextAlign != TextAlign.Left);
+            var @class = ClassList.Create(className)
+                                  .Add(Attributes)
+                                  .Add(alignClassName, TextAlign != TextAlign.Left)
+                                  .ToString();
 
             if (Visible)
             {
                 builder.OpenElement(0, tagName);
                 builder.AddAttribute(1, "style", Style);
                 builder.AddMultipleAttributes(2, Attributes);
-                builder.AddAttribute(3, "class", classList.ToString());
+                builder.AddAttribute(3, "class", @class);
                 builder.AddAttribute(4, "id", GetId());
 
                 if (!string.IsNullOrEmpty(Text))

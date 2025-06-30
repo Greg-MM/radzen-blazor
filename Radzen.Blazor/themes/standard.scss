@@ -226,6 +226,8 @@ $tabs-tab-hover-color: var(--rz-primary) !default;
 // Grid
 $grid-border-radius: 0 !default;
 $grid-data-border-shadow: 0 1px 0 0 var(--rz-base-200), 0 -1px 0 0 var(--rz-base-200);
+$grid-cell-focus-background-color: var(--rz-primary-lighter) !default;
+$grid-cell-focus-color: var(--rz-on-primary-lighter) !default;
 $grid-hover-background-color: var(--rz-primary-lighter) !default;
 $grid-hover-color: var(--rz-on-primary-lighter) !default;
 $grid-selected-background-color: lighten($rz-primary-lighter, 20%) !default;
@@ -247,6 +249,8 @@ $grid-filter-buttons-background-color: var(--rz-base-100) !default;
 $grid-clear-filter-button-background-color: var(--rz-base-200) !default;
 $grid-clear-filter-button-color: var(--rz-text-color) !default;
 $grid-header-filter-icon-hover-color: var(--rz-text-title-color) !default;
+$grid-simple-filter-icon-active-color: var(--rz-on-primary-lighter) !default;
+$grid-simple-filter-icon-active-background-color: var(--rz-primary-lighter) !default;
 $grid-border: none !default;
 $grid-shadow: none !default;
 $grid-column-resizer-helper-background-color: var(--rz-primary) !default;
@@ -401,6 +405,11 @@ $timepicker-button-background-color: var(--rz-primary) !default;
 $timepicker-button-color: var(--rz-on-primary) !default;
 $timepicker-button-border-radius: var(--rz-border-radius) !default;
 
+// TimeSpanPicker
+$timespanpicker-trigger-icon-color: var(--rz-text-color) !default;
+$timespanpicker-trigger-icon-hover-color: var(--rz-text-title-color) !default;
+$timespanpicker-popup-shadow: $rz-shadow-3 !default;
+
 // Fieldset
 $fieldset-border: var(--rz-border-base-300) !default;
 $fieldset-border-radius: var(--rz-border-radius) !default;
@@ -548,6 +557,12 @@ $form-field-focus-shadow: var(--rz-input-focus-shadow) !default;
 
 // Layout
 $layout-background-color: transparent !default;
+
+// Toc
+$rz-toc-link-hover-color: var(--rz-primary-dark) !default;
+$rz-toc-link-selected-color: var(--rz-primary) !default;
+$rz-toc-link-selected-indicator-color: var(--rz-primary) !default;
+$rz-toc-horizontal-link-selected-color: var(--rz-primary) !default;
 
 @import 'fonts';
 @import 'components';

@@ -65,6 +65,7 @@
   /* Transition */
   --rz-transition: #{$rz-transition};
   --rz-transition-all: #{$rz-transition-all};
+  --rz-expander-transition: #{$rz-expander-transition};
 
   /* Layout Body */
   --rz-layout-body-margin: #{$layout-body-margin};
@@ -356,6 +357,7 @@
   --rz-dialog-border-radius: #{$dialog-border-radius};
   --rz-dialog-mask-zindex: #{$dialog-mask-zindex};
   --rz-dialog-zindex: #{$dialog-zindex};
+  --rz-dialog-transition: #{$dialog-transition};
 
   /* DropDown */
   --rz-dropdown-trigger-icon-width: #{$dropdown-trigger-icon-width};
@@ -559,6 +561,8 @@
   --rz-grid-header-filter-icon-hover-color: #{$grid-header-filter-icon-hover-color};
   --rz-grid-header-filter-icon-active-color: #{$grid-header-filter-icon-active-color};
   --rz-grid-header-filter-icon-font-size: #{$grid-header-filter-icon-font-size};
+  --rz-grid-simple-filter-icon-active-color: #{$grid-simple-filter-icon-active-color};
+  --rz-grid-simple-filter-icon-active-background-color: #{$grid-simple-filter-icon-active-background-color};
   --rz-grid-border: #{$grid-border};
   --rz-grid-border-radius: #{$grid-border-radius};
   --rz-grid-sort-icon-width: #{$grid-sort-icon-width};
@@ -622,15 +626,21 @@
   --rz-input-placeholder-color: #{$input-placeholder-color};
   --rz-input-background-color: #{$input-background-color};
   --rz-input-border: #{$input-border};
+  --rz-input-border-block-end: #{$input-border-block-end};
   --rz-input-border-radius: #{$input-border-radius};
   --rz-input-shadow: #{$input-shadow};
   --rz-input-hover-shadow: #{$input-hover-shadow};
+  --rz-input-hover-background-color: #{$input-hover-background-color};
   --rz-input-hover-border: #{$input-hover-border};
+  --rz-input-hover-border-block-end: #{$input-hover-border-block-end};
   --rz-input-focus-shadow: #{$input-focus-shadow};
+  --rz-input-focus-background-color: #{$input-focus-background-color};
   --rz-input-focus-border: #{$input-focus-border};
+  --rz-input-focus-border-block-end: #{$input-focus-border-block-end};
   --rz-input-focus-outline: #{$input-focus-outline};
   --rz-input-focus-outline-offset: #{$input-focus-outline-offset};
   --rz-input-disabled-border: #{$input-disabled-border};
+  --rz-input-disabled-border-block-end: #{$input-disabled-border-block-end};
   --rz-input-disabled-shadow: #{$input-disabled-shadow};
   --rz-input-disabled-background-color: #{$input-disabled-background-color};
   --rz-input-disabled-color: #{$input-disabled-color};
@@ -687,6 +697,7 @@
   --rz-menu-item-focus-outline: #{$menu-item-focus-outline};
   --rz-menu-item-focus-outline-offset: #{$menu-item-focus-outline-offset};
   --rz-menu-item-selected-color: #{$menu-item-selected-color};
+  --rz-menu-item-selected-background-color: #{$menu-item-selected-background-color};
   --rz-menu-item-icon-margin-inline: #{$menu-item-icon-margin-inline};
   --rz-menu-item-icon-color: #{$menu-item-icon-color};
   --rz-menu-item-icon-hover-color: #{$menu-item-icon-hover-color};
@@ -701,6 +712,7 @@
   --rz-menu-top-item-hover-color: #{$menu-top-item-hover-color};
   --rz-menu-top-item-hover-background-color: #{$menu-top-item-hover-background-color};
   --rz-menu-top-item-selected-color: #{$menu-top-item-selected-color};
+  --rz-menu-top-item-selected-background-color: #{$menu-top-item-selected-background-color};
   --rz-menu-top-item-icon-color: #{$menu-top-item-icon-color};
   --rz-menu-top-item-icon-hover-color: #{$menu-top-item-icon-hover-color};
   --rz-context-menu-padding-block: #{$context-menu-padding-block};
@@ -1000,6 +1012,10 @@
   --rz-selectbar-selected-color: #{$selectbar-selected-color};
   --rz-selectbar-selected-border: #{$selectbar-selected-border};
   --rz-selectbar-border-radius: #{$selectbar-border-radius};
+  --rz-selectbar-focus-outline: #{$selectbar-focus-outline};
+  --rz-selectbar-focus-outline-offset: #{$selectbar-focus-outline-offset};
+  --rz-selectbar-button-focus-outline: #{$selectbar-button-focus-outline};
+  --rz-selectbar-button-focus-outline-offset: #{$selectbar-button-focus-outline-offset};
 
   /* SidebarToggle */
   --rz-sidebar-toggle-icon-width: #{$sidebar-toggle-icon-width};
@@ -1140,6 +1156,56 @@
   --rz-timeline-line-color: #{$rz-timeline-line-color};
   --rz-timeline-line-width: #{$rz-timeline-line-width};
   --rz-timeline-line-border-radius: #{$rz-timeline-line-border-radius};
+
+  /* TimestampPicker */
+  --rz-timespanpicker-line-height: #{$timespanpicker-line-height};
+  --rz-timespanpicker-trigger-icon-width: #{$timespanpicker-trigger-icon-width};
+  --rz-timespanpicker-trigger-icon-height: #{$timespanpicker-trigger-icon-height};
+  --rz-timespanpicker-trigger-icon-color: #{$timespanpicker-trigger-icon-color};
+  --rz-timespanpicker-trigger-icon-hover-color: #{$timespanpicker-trigger-icon-hover-color};
+  --rz-timespanpicker-focus-outline: #{$timespanpicker-focus-outline};
+  --rz-timespanpicker-focus-outline-offset: #{$timespanpicker-focus-outline-offset};
+  --rz-timespanpicker-popup-border: #{$timespanpicker-popup-border};
+  --rz-timespanpicker-popup-shadow: #{$timespanpicker-popup-shadow};
+  --rz-timespanpicker-popup-margin: #{$timespanpicker-popup-margin};
+  --rz-timespanpicker-popup-width: #{$timespanpicker-popup-width};
+  --rz-timespanpicker-panel-background-color: #{$timespanpicker-panel-background-color};
+  --rz-timespanpicker-panel-padding: #{$timespanpicker-panel-padding};
+  --rz-timespanpicker-panel-gap: #{$timespanpicker-panel-gap};
+  --rz-timespanpicker-panel-unit-gap: #{$timespanpicker-panel-unit-gap};
+  --rz-timespanpicker-panel-field-min-width: #{$timespanpicker-panel-field-min-width};
+  --rz-timespanpicker-unit-label-color: #{$timespanpicker-unit-label-color};
+
+  /* Toc */
+  --rz-toc-link-padding-block: #{$rz-toc-link-padding-block};
+  --rz-toc-link-padding-inline: #{$rz-toc-link-padding-inline};
+  --rz-toc-link-font-size: #{$rz-toc-link-font-size};
+  --rz-toc-link-font-weight: #{$rz-toc-link-font-weight};
+  --rz-toc-link-border: #{$rz-toc-link-border};
+  --rz-toc-link-border-radius: #{$rz-toc-link-border-radius};
+  --rz-toc-link-color: #{$rz-toc-link-color};
+  --rz-toc-link-background-color: #{$rz-toc-link-background-color};
+  --rz-toc-link-hover-color: #{$rz-toc-link-hover-color};
+  --rz-toc-link-hover-background-color: #{$rz-toc-link-hover-background-color};
+  --rz-toc-link-selected-border: #{$rz-toc-link-selected-border};
+  --rz-toc-link-selected-color: #{$rz-toc-link-selected-color};
+  --rz-toc-link-selected-background-color: #{$rz-toc-link-selected-background-color};
+  --rz-toc-link-selected-indicator-color: #{$rz-toc-link-selected-indicator-color};
+  --rz-toc-link-selected-indicator-size: #{$rz-toc-link-selected-indicator-size};
+  --rz-toc-link-selected-indicator-inset-block: #{$rz-toc-link-selected-indicator-inset-block};
+  --rz-toc-link-selected-indicator-inset-inline: #{$rz-toc-link-selected-indicator-inset-inline};
+  --rz-toc-horizontal-shadow: #{$rz-toc-horizontal-shadow};
+  --rz-toc-horizontal-border-radius: #{$rz-toc-horizontal-border-radius};
+  --rz-toc-horizontal-background-color: #{$rz-toc-horizontal-background-color};
+  --rz-toc-horizontal-link-padding-block: #{$rz-toc-horizontal-link-padding-block};
+  --rz-toc-horizontal-link-padding-inline: #{$rz-toc-horizontal-link-padding-inline};
+  --rz-toc-horizontal-link-font-size: #{$rz-toc-horizontal-link-font-size};
+  --rz-toc-horizontal-link-selected-indicator-inset-block: #{$rz-toc-horizontal-link-selected-indicator-inset-block};
+  --rz-toc-horizontal-link-selected-indicator-inset-inline: #{$rz-toc-horizontal-link-selected-indicator-inset-inline};
+  --rz-toc-horizontal-link-selected-border: #{$rz-toc-horizontal-link-selected-border};
+  --rz-toc-horizontal-link-selected-color: #{$rz-toc-horizontal-link-selected-color};
+  --rz-toc-horizontal-link-selected-background-color: #{$rz-toc-horizontal-link-selected-background-color};
+  --rz-toc-link-selected-indicator-border-radius: #{$rz-toc-link-selected-indicator-border-radius};
 
   /* Tooltip */
   --rz-tooltip-background-color: #{$tooltip-background-color};

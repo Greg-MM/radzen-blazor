@@ -15,7 +15,7 @@
 }
 
 <div @ref=view class="rz-view rz-planner-view" tabindex="0" @onkeydown="@(args => OnKeyPress(args))" @onkeydown:preventDefault="@preventKeyPress" @onkeydown:stopPropagation
-                 @onfocus=@(args => {CurrentDate = CurrentDate != default(DateTime) ? CurrentDate : StartDate; CurrentMonth = CurrentMonth != -1 ? CurrentMonth : 0; })>
+     @onfocus=@this.AsNonRenderingEventHandler(OnFocus)>
     <div class="rz-view-header">
         <div class="rz-slot-header">
         </div>
@@ -95,7 +95,7 @@
             </div>
             <div class="rz-slots">
                 <div @attributes=@Attributes(realstart, "rz-slot", false)>
-                    <div class="rz-slot-header" style="cursor: pointer;" @onclick=@(args => OnMonthClick(startMonth))>
+                    <div class="rz-slot-header" @onclick=@(args => OnMonthClick(startMonth))>
                         @realstart.ToString("MMM", Scheduler.Culture)
                     </div>
                 </div>
@@ -126,7 +126,7 @@
                     }
                 }
                 <div @attributes=@Attributes(realstart, "rz-slot", false)>
-                    <div class="rz-slot-header" style="cursor: pointer;" @onclick=@(args => OnMonthClick(startMonth))>
+                    <div class="rz-slot-header" @onclick=@(args => OnMonthClick(startMonth))>
                         @realstart.ToString("MMM", Scheduler.Culture)
                     </div>
                 </div>
@@ -137,6 +137,12 @@
 </div>
 
 @code {
+    void OnFocus()
+    {
+        CurrentDate = CurrentDate != default(DateTime) ? CurrentDate : StartDate; 
+        CurrentMonth = CurrentMonth != -1 ? CurrentMonth : 0;
+    }
+
     ElementReference view;
 
     [Parameter]
@@ -162,7 +168,7 @@
 
     IDictionary<string, object> Attributes(DateTime start, string className, bool slotInMonth)
     {
-        var attributes = Scheduler.GetSlotAttributes(start, start.AddDays(1));
+        var attributes = Scheduler.GetSlotAttributes(start, start.AddDays(1), () => AppointmentsInRange(start, start.AddDays(1)));
         attributes["class"] = ClassList.Create(className).Add(attributes).ToString();
         attributes["dropzone"] = "move";
         if (!slotInMonth)

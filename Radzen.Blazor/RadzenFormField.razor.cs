@@ -106,7 +106,13 @@ namespace Radzen.Blazor
         /// </example>
         [Parameter]
         public RenderFragment Helper { get; set; }
+        /// <summary>
+        /// Gets or sets the custom content for the label using a Razor template.
+        /// When provided, this template will be rendered instead of the plain text specified in the Text parameter.
+        /// </summary>
 
+        [Parameter]
+        public RenderFragment TextTemplate { get; set; }
         /// <summary>
         /// Gets or sets the label text.
         /// </summary>
@@ -161,9 +167,10 @@ namespace Radzen.Blazor
         }
 
         /// <inheritdoc />
-        protected override string GetComponentCssClass()
-        {
-            return ClassList.Create($"rz-form-field rz-variant-{Enum.GetName(typeof(Variant), Variant).ToLowerInvariant()}").AddDisabled(disabled).Add("rz-floating-label", AllowFloatingLabel == true).ToString();
-        }
+        protected override string GetComponentCssClass() => ClassList.Create("rz-form-field")
+            .AddVariant(Variant)
+            .AddDisabled(disabled)
+            .Add("rz-floating-label", AllowFloatingLabel)
+            .ToString();
     }
 }

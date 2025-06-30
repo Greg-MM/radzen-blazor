@@ -616,7 +616,7 @@ $steps-number-background-color: var(--rz-base-600) !default;
 $steps-number-color: var(--rz-text-secondary-color) !default;
 
 .rz-steps {
-  [role='tablist'] {
+  > ul {
     display: flex;
   }
   .rz-steps-item {
@@ -867,6 +867,7 @@ $slider-disabled-handle-background-color: $slider-disabled-range-background-colo
 // Rating
 $rating-color: var(--rz-text-secondary-color) !default;
 $rating-opacity: 1 !default;
+$rating-focus-color: var(--rz-primary-light) !default;
 $rating-selected-color: var(--rz-primary) !default;
 $rating-disabled-color: var(--rz-text-disabled-color) !default;
 $rating-disabled-opacity: 0.5 !default;
@@ -881,7 +882,7 @@ $selectbar-selected-color: var(--rz-on-primary-lighter) !default;
 $selectbar-selected-border: var(--rz-border-base-600) !default;
 $selectbar-border-radius: var(--rz-border-radius) !default;
 
-.rz-selectbutton {
+.rz-selectbar {
   .rz-button {
     box-shadow: none;
     &:hover {
@@ -977,6 +978,24 @@ $timepicker-border: var(--rz-border-base-600) !default;
   }
 }
 
+// TimeSpanPicker
+$timespanpicker-line-height: 1.5rem !default;
+$timespanpicker-trigger-icon-color: var(--rz-text-secondary-color) !default;
+$timespanpicker-trigger-icon-hover-color: var(--rz-text-title-color) !default;
+$timespanpicker-popup-border: none !default;
+$timespanpicker-popup-shadow: var(--rz-shadow-4) !default;
+$timespanpicker-panel-padding: 0.75rem !default;
+$timespanpicker-panel-unit-gap: 0.25rem !default;
+$timespanpicker-panel-field-min-width: 5rem !default;
+
+.rz-timespanpicker-panel {
+  flex-direction: column;
+
+  > .rz-button {
+    align-self: stretch;
+  }
+}
+
 // Numeric
 $numeric-button-background-color: transparent !default;
 $numeric-button-color: var(--rz-text-color) !default;
@@ -1057,6 +1076,8 @@ $grid-apply-filter-button-shadow: none !default;
 $grid-header-filter-icon-margin-inline: auto 1rem !default;
 $grid-header-filter-icon-hover-color: var(--rz-text-title-color) !default;
 $grid-header-filter-icon-font-size: 1.25rem !default;
+$grid-simple-filter-icon-active-color: var(--rz-on-primary-lighter) !default;
+$grid-simple-filter-icon-active-background-color: var(--rz-primary-lighter) !default;
 $grid-border: var(--rz-border-base-600) !default;
 $grid-sort-icon-width: 1.25rem !default;
 $grid-shadow: none !default;
@@ -1527,6 +1548,18 @@ $form-field-label-inset-inline-start: 0.6875rem !default;
 $form-field-label-textarea-top: 0.5rem !default;
 $form-field-label-floating-top: -0.5625rem !default;
 $form-field-helper-padding: 0 1rem !default;
+
+// Toc
+$rz-toc-link-hover-color: var(--rz-primary-dark) !default;
+$rz-toc-link-selected-color: var(--rz-primary) !default;
+$rz-toc-link-selected-indicator-inset-block: 0 !default;
+$rz-toc-link-selected-indicator-color: var(--rz-primary) !default;
+$rz-toc-horizontal-link-selected-color: var(--rz-primary) !default;
+$rz-toc-horizontal-link-selected-indicator-inset-inline: 0 !default;
+
+.rz-toc-link {
+  @include rz-ripple($pseudo: true);
+}
 
 @import 'fonts';
 @import 'components';

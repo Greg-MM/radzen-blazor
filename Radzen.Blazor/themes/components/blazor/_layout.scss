@@ -61,10 +61,8 @@ $layout-background-color: var(--rz-body-background-color) !default;
     overflow-x: hidden;
   }
   
-  .rz-header,
-  .rz-footer,
-  .rz-body {
-    width: 100vw;
+  .rz-layout {
+    height: 100dvh;
   }
 
   // Align layout to the end when second Sidebar is expanded

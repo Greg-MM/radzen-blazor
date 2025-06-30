@@ -6,6 +6,7 @@ namespace RadzenBlazorDemos
     {
         public bool New { get; set; }
         public bool Updated { get; set; }
+        public bool Pro { get; set; }
         public string Name { get; set; }
         public string Icon { get; set; }
         public string Path { get; set; }
@@ -14,5 +15,12 @@ namespace RadzenBlazorDemos
         public bool Expanded { get; set; }
         public IEnumerable<Example> Children { get; set; }
         public IEnumerable<string> Tags { get; set; }
+        public IEnumerable<ExampleSection> Toc { get; set; }
+    }
+
+    public class ExampleSection
+    {
+        public string Text { get; set; }
+        public string Anchor { get; set; }
     }
 }

@@ -141,15 +141,17 @@ namespace Radzen.Blazor
         /// Gets the choose class list.
         /// </summary>
         /// <value>The choose class list.</value>
-        ClassList ChooseClassList => ClassList.Create("rz-fileupload-choose rz-button")
-                                              .AddDisabled(Disabled);
+        string ChooseClassList => ClassList.Create("rz-fileupload-choose rz-button")
+                                           .AddDisabled(Disabled)
+                                           .ToString();
 
         /// <summary>
         /// Gets the button class list.
         /// </summary>
         /// <value>The button class list.</value>
-        ClassList ButtonClassList => ClassList.Create("rz-button rz-button-icon-only rz-base rz-shade-default")
-                                              .AddDisabled(Disabled);
+        string ButtonClassList => ClassList.Create("rz-button rz-button-icon-only rz-base rz-shade-default")
+                                            .AddDisabled(Disabled)
+                                            .ToString();
 
         /// <summary>
         /// Gets or sets the child content.
@@ -283,7 +285,7 @@ namespace Radzen.Blazor
                 await OnRemove(files[0], false);
             }
 
-            await Change.InvokeAsync(new UploadChangeEventArgs() { Files = files.Select(f => new FileInfo() { Name = f.Name, Size = f.Size }).ToList() });
+            await Change.InvokeAsync(CreateUploadChangeEventArgs(files));
         }
 
         /// <summary>
@@ -310,7 +312,7 @@ namespace Radzen.Blazor
         {
             files.Remove(file);
             await JSRuntime.InvokeVoidAsync("Radzen.removeFileFromUpload", fileUpload, file.Name);
-            if (fireChangeEvent) await Change.InvokeAsync(new UploadChangeEventArgs() { Files = files.Select(f => new FileInfo() { Name = f.Name, Size = f.Size }).ToList() });
+            if (fireChangeEvent) await Change.InvokeAsync(CreateUploadChangeEventArgs(files));
         }
 
         /// <summary>
@@ -327,7 +329,7 @@ namespace Radzen.Blazor
 
             this.files = files.ToList();
 
-            await Change.InvokeAsync(new UploadChangeEventArgs() { Files = files.Select(f => new FileInfo() { Name = f.Name, Size = f.Size }).ToList() });
+            await Change.InvokeAsync(CreateUploadChangeEventArgs(files));
 
             await InvokeAsync(StateHasChanged);
         }
@@ -400,11 +402,19 @@ namespace Radzen.Blazor
             var files = Multiple ? args.GetMultipleFiles(MaxFileCount).Select(f => new FileInfo(f))
                 : new FileInfo[] { new FileInfo (args.File) };
 
-            this.files = files.Select(f => new PreviewFileInfo() { Name = f.Name, Size = f.Size  }).ToList();
+            this.files = files.Select(f => new PreviewFileInfo(f.Source) { Name = f.Name, Size = f.Size }).ToList();
 
-            await Change.InvokeAsync(new UploadChangeEventArgs() { Files = files });
+            await Change.InvokeAsync(CreateUploadChangeEventArgs(files));
 
             await InvokeAsync(StateHasChanged);
         }
+
+        /// <summary>
+        /// Creates the upload change event args.
+        /// </summary>
+        /// <param name="files"></param>
+        /// <returns></returns>
+        public UploadChangeEventArgs CreateUploadChangeEventArgs(IEnumerable<FileInfo> files)
+           => new UploadChangeEventArgs() { Files = files };
     }
 }

@@ -21,12 +21,22 @@ namespace Radzen.Blazor
         [Parameter(CaptureUnmatchedValues = true)]
         public IReadOnlyDictionary<string, object> Attributes { get; set; }
 
-        ClassList ContentClassList => ClassList.Create("rz-treenode-content")
-                                               .Add("rz-treenode-content-selected", selected)
-                                               .Add("rz-state-focused", Tree.IsFocused(this));
-        ClassList IconClassList => ClassList.Create("notranslate rz-tree-toggler rzi")
-                                               .Add("rzi-caret-down", clientExpanded)
-                                               .Add("rzi-caret-right", !clientExpanded);
+        string ContentClass => ClassList.Create("rz-treenode-content")
+                                        .Add("rz-treenode-content-selected", selected)
+                                        .Add("rz-state-focused", Tree.IsFocused(this))
+                                        .Add(Tree.ItemContentCssClass)
+                                        .Add(ContentCssClass)
+                                        .ToString();
+        string IconClass => ClassList.Create("notranslate rz-tree-toggler rzi")
+                                     .Add("rzi-caret-down", clientExpanded)
+                                     .Add("rzi-caret-right", !clientExpanded)
+                                     .Add(Tree.ItemIconCssClass)
+                                     .Add(IconCssClass)
+                                     .ToString();
+        string LabelClass => ClassList.Create("rz-treenode-label")
+                                      .Add(Tree.ItemLabelCssClass)
+                                      .Add(LabelCssClass)
+                                      .ToString();
         /// <summary>
         /// Gets or sets the child content.
         /// </summary>
@@ -98,6 +108,24 @@ namespace Radzen.Blazor
         [Parameter]
         public IEnumerable Data { get; set; }
 
+        /// <summary>
+        /// Gets or sets the CSS classes added to the content.
+        /// </summary>
+        [Parameter]
+        public string ContentCssClass { get; set; }
+
+        /// <summary>
+        /// Gets or sets the CSS classes added to the icon.
+        /// </summary>
+        [Parameter]
+        public string IconCssClass { get; set; }
+
+        /// <summary>
+        /// Gets or sets the CSS classes added to the label.
+        /// </summary>
+        [Parameter]
+        public string LabelCssClass { get; set; }
+
         internal List<RadzenTreeItem> items = new List<RadzenTreeItem>();
 
         internal void AddItem(RadzenTreeItem item)
@@ -130,9 +158,9 @@ namespace Radzen.Blazor
         }
 
         bool clientExpanded;
-        internal async Task Toggle()
+        async Task Toggle()
         {
-            if (expanded)
+            if (expanded && !Tree.SingleExpand)
             {
                 clientExpanded = !clientExpanded;
 
@@ -204,15 +232,14 @@ namespace Radzen.Blazor
 
                 if (Tree.SingleExpand)
                 {
-                    var siblings = ParentItem?.items ?? Tree.items;
+                    var siblings = (ParentItem?.items ?? Tree.items).Where(s => s != this && s.expanded).ToList();
 
                     foreach (var sibling in siblings)
                     {
-                        if (sibling != this && sibling.expanded)
-                        {
-                            await sibling.Toggle();
-                        }
+                        await sibling.Toggle();
                     }
+
+                    await Tree.ChangeState();
                 }
             }
         }

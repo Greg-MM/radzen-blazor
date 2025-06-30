@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.JSInterop;
+using Radzen.Blazor.Rendering;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -23,11 +24,6 @@ namespace Radzen.Blazor
     /// </example>
     public partial class RadzenSplitButton : RadzenComponentWithChildren
     {
-        private string getButtonSize()
-        {
-            return Size == ButtonSize.Medium ? "md" : Size == ButtonSize.Large ? "lg" : Size == ButtonSize.Small ? "sm" : "xs";
-        }
-
         /// <summary>
         /// Gets or sets the child content.
         /// </summary>
@@ -132,7 +128,6 @@ namespace Radzen.Blazor
         [Parameter]
         public bool AlwaysOpenPopup { get; set; }
 
-
         /// <summary>
         /// Gets or sets the open button aria-label attribute.
         /// </summary>
@@ -146,11 +141,25 @@ namespace Radzen.Blazor
         public string DropDownIcon { get; set; } = "arrow_drop_down";
 
         /// <summary>
+        /// Gets or sets the index of the tab.
+        /// </summary>
+        /// <value>The index of the tab.</value>
+        [Parameter]
+        public int TabIndex { get; set; } = 0;
+
+        /// <summary>
         /// Gets or sets the click callback.
         /// </summary>
         /// <value>The click callback.</value>
         [Parameter]
         public EventCallback<RadzenSplitButtonItem> Click { get; set; }
+
+        /// <summary>
+        /// Gets or sets the type of the button.
+        /// </summary>
+        /// <value>The type of the button.</value>
+        [Parameter]
+        public ButtonType ButtonType { get; set; } = ButtonType.Button;
 
         /// <summary>
         /// Handles the <see cref="E:Click" /> event.
@@ -192,15 +201,22 @@ namespace Radzen.Blazor
             }
         }
 
-        private string getButtonCss()
-        {
-            return $"rz-button rz-button-{getButtonSize()} rz-variant-{Enum.GetName(typeof(Variant), Variant).ToLowerInvariant()} rz-{Enum.GetName(typeof(ButtonStyle), ButtonStyle).ToLowerInvariant()} rz-shade-{Enum.GetName(typeof(Shade), Shade).ToLowerInvariant()} {(IsDisabled ? " rz-state-disabled" : "")}{(string.IsNullOrEmpty(Text) && !string.IsNullOrEmpty(Icon) ? " rz-button-icon-only" : "")}";
-        }
+        string ButtonClass => ClassList.Create("rz-button")
+                                       .AddButtonSize(Size)
+                                       .AddVariant(Variant)
+                                       .AddButtonStyle(ButtonStyle)
+                                       .AddShade(Shade)
+                                       .Add("rz-button-icon-only", string.IsNullOrEmpty(Text) && !string.IsNullOrEmpty(Icon))
+                                       .AddDisabled(IsDisabled)
+                                       .ToString();
 
-        private string getPopupButtonCss()
-        {
-            return $"rz-splitbutton-menubutton rz-button rz-button-icon-only rz-button-{getButtonSize()} rz-variant-{Enum.GetName(typeof(Variant), Variant).ToLowerInvariant()} rz-{Enum.GetName(typeof(ButtonStyle), ButtonStyle).ToLowerInvariant()} rz-shade-{Enum.GetName(typeof(Shade), Shade).ToLowerInvariant()}{(IsDisabled ? " rz-state-disabled" : "")}";
-        }
+        string PopupButtonClass => ClassList.Create("rz-splitbutton-menubutton rz-button rz-button-icon-only")
+                                            .AddButtonSize(Size)
+                                            .AddVariant(Variant)
+                                            .AddButtonStyle(ButtonStyle)
+                                            .AddShade(Shade)
+                                            .AddDisabled(IsDisabled)
+                                            .ToString();
 
         private string OpenPopupScript()
         {
@@ -225,7 +241,7 @@ namespace Radzen.Blazor
 
             if (IsJSRuntimeAvailable)
             {
-                JSRuntime.InvokeVoidAsync("Radzen.destroyPopup", PopupID);
+                JSRuntime.InvokeVoid("Radzen.destroyPopup", PopupID);
             }
         }
 

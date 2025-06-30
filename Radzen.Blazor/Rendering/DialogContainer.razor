@@ -1,20 +1,27 @@
 @using Microsoft.JSInterop
 @using System.Reflection;
+@using System.ComponentModel
 @inject IJSRuntime JSRuntime
 @implements IDisposable
-<div class="@WrapperCssClass">
-    <div @ref="dialog" class="@CssClass" role="dialog" aria-labelledby="rz-dialog-0-label" style=@Style>
+<div class=@WrapperClass>
+    <div @ref="dialog" class=@Class role="dialog" aria-labelledby="rz-dialog-0-label" style=@Style>
         @if (Dialog.Options.ShowTitle)
         {
             <div class="rz-dialog-titlebar">
                 <div class="rz-dialog-title" id="rz-dialog-0-label">
+                    @if (!string.IsNullOrEmpty(Dialog.Options.Icon))
+                    {
+                        <RadzenIcon Icon="@Dialog.Options.Icon" 
+                                    IconColor="@(string.IsNullOrEmpty(Dialog.Options.IconColor) ? null : Dialog.Options.IconColor)" 
+                                    Style="@Dialog.Options.IconStyle" />
+                    }
                     @if (Dialog.Options.TitleContent != null)
                     {
                         @Dialog.Options.TitleContent(Service)
                     }
                     else
                     {
-                        @((MarkupString)Dialog.Title)
+                        @Dialog.Title
                     }
                 </div>
                 @if (Dialog.Options.ShowClose)
@@ -25,7 +32,7 @@
                 }
             </div>
         }
-        <div class="@ContentCssClass">
+        <div class=@ContentClass>
             @if (Dialog.Options.ChildContent != null)
             {
                 @Dialog.Options.ChildContent(Service)
@@ -48,7 +55,6 @@
             <div class="rz-dialog-mask" style="pointer-events: none;"></div>
         }
     }
-
 </div>
 
 @code {
@@ -125,21 +131,30 @@
     public bool ShowMask { get; set; } = true;
 
     RenderFragment ChildContent => new RenderFragment(builder =>
+    {
+        // Wrap the Dialog component in a CascadingValue
+
+        builder.OpenComponent<CascadingValue<Dialog>>(0); // Open CascadingValue
+        builder.AddAttribute(1, "Value", Dialog);
+        builder.AddAttribute(2, "IsFixed", true);
+        builder.AddAttribute(3, "ChildContent", (RenderFragment)((builder2) =>
         {
-            builder.OpenComponent(0, Dialog.Type);
+            builder2.OpenComponent(0, Dialog.Type); // Open Dialog
 
             if (Dialog.Parameters != null)
             {
                 foreach (var parameter in Dialog.Parameters)
                 {
-                    builder.AddAttribute(1, parameter.Key, parameter.Value);
+                    builder2.AddAttribute(1, parameter.Key, parameter.Value);
                 }
             }
 
-            builder.AddComponentReferenceCapture(2, component => reference = component);
+            builder2.AddComponentReferenceCapture(2, component => reference = component); // Capture reference
+            builder2.CloseComponent(); // Close Dialog
 
-            builder.CloseComponent();
-        });
+        }));
+        builder.CloseComponent(); // Close CascadingValue
+    });
 
     object reference;
 
@@ -148,32 +163,17 @@
         Service.Close();
     }
 
-    string CssClass
-    {
-        get
-        {
-            var baseCss = "rz-dialog";
-            return string.IsNullOrEmpty(Dialog.Options.CssClass) ? baseCss : $"{baseCss} {Dialog.Options.CssClass}";
-        }
-    }
+    string Class => ClassList.Create("rz-dialog rz-open")
+                             .Add(Dialog.Options.CssClass)
+                             .ToString();
 
-    string WrapperCssClass
-    {
-        get
-        {
-            var baseCss = "rz-dialog-wrapper";
-            return string.IsNullOrWhiteSpace(Dialog.Options.WrapperCssClass) ? baseCss : $"{baseCss} {Dialog.Options.WrapperCssClass}";
-        }
-    }
+    string WrapperClass => ClassList.Create("rz-dialog-wrapper")
+                                    .Add(Dialog.Options.WrapperCssClass)
+                                    .ToString();
 
-    string ContentCssClass
-    {
-        get
-        {
-            var baseCss = "rz-dialog-content";
-            return string.IsNullOrEmpty(Dialog.Options.ContentCssClass) ? baseCss : $"{baseCss} {Dialog.Options.ContentCssClass}";
-        }
-    }
+    string ContentClass => ClassList.Create("rz-dialog-content")
+                                    .Add(Dialog.Options.ContentCssClass)
+                                    .ToString();
 
     string Style
     {
@@ -197,6 +197,23 @@
     protected override void OnInitialized()
     {
         Service.OnRefresh += OnRefresh;
+
+		// Subscribe to PropertyChanged event to auto refresh the dialog when properties change
+        Dialog.PropertyChanged += OnPropertyChanged;
+
+		// Subscribe to PropertyChanged event to auto refresh the dialog when properties change
+		if (Dialog.Options != null)
+			Dialog.Options.PropertyChanged += OnPropertyChanged;
+    }
+
+    /// <summary>
+    /// Handles the property changed event and triggers a refresh.
+    /// </summary>
+    /// <param name="sender">The source of the event.</param>
+    /// <param name="e">The <see cref="PropertyChangedEventArgs"/> instance containing the event data.</param>
+    void OnPropertyChanged(object sender, PropertyChangedEventArgs e)
+    {
+        OnRefresh();
     }
 
     void OnRefresh()
@@ -214,6 +231,14 @@
     public void Dispose()
     {
         Service.OnRefresh -= OnRefresh;
+
+		// Unsubscribe from PropertyChanged event
+        Dialog.PropertyChanged -= OnPropertyChanged;
+
+		// Unsubscribe from PropertyChanged event
+        if (Dialog.Options != null)
+            Dialog.Options.PropertyChanged -= OnPropertyChanged;
+
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)

@@ -1,10 +1,13 @@
-﻿using Radzen.Blazor;
+﻿using Radzen;
+using Radzen.Blazor;
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using System.Linq.Dynamic.Core;
+using System.Linq.Expressions;
+using System.Reflection;
+using System.Text.RegularExpressions;
 
 namespace Radzen
 {
@@ -13,29 +16,457 @@ namespace Radzen
     /// </summary>
     public static class QueryableExtension
     {
+        static Expression notNullCheck(Expression property) => Nullable.GetUnderlyingType(property.Type) != null || property.Type == typeof(string) ?
+            Expression.Coalesce(property, property.Type == typeof(string) ? Expression.Constant(string.Empty) : Expression.Constant(null, property.Type)) : property;
+
         /// <summary>
-        /// The filter operators
+        /// Projects each element of a sequence into a collection of property values.
         /// </summary>
-        internal static readonly IDictionary<string, string> FilterOperators = new Dictionary<string, string>
+        internal static IQueryable Select(this IQueryable source, string propertyName)
         {
-            {"eq", "="},
-            {"ne", "!="},
-            {"lt", "<"},
-            {"le", "<="},
-            {"gt", ">"},
-            {"ge", ">="},
-            {"startswith", "StartsWith"},
-            {"endswith", "EndsWith"},
-            {"contains", "Contains"},
-            {"DoesNotContain", "Contains"}
-        };
+            var parameter = Expression.Parameter(source.ElementType, "x");
+
+            var property = GetNestedPropertyExpression(parameter, propertyName);
+
+            var lambda = Expression.Lambda(notNullCheck(property), parameter);
+
+            var selectExpression = Expression.Call(typeof(Queryable),
+                nameof(Queryable.Select), [source.ElementType, property.Type], source.Expression,
+                    Expression.Quote(lambda));
+
+            return source.Provider.CreateQuery(selectExpression);
+        }
+
+
+        /// <summary>
+        /// Projects each element of a sequence to an IEnumerable and flattens the resulting sequences into one sequence.
+        /// </summary>
+        public static IQueryable SelectMany(this IQueryable source, string propertyName)
+        {
+            var parameter = Expression.Parameter(source.ElementType, "x");
+
+            var property = GetNestedPropertyExpression(parameter, propertyName);
+
+            var lambda = Expression.Lambda(notNullCheck(property), parameter);
+
+            var returnElementType = property.Type.GetElementType() ??
+                (property.Type.IsGenericType ? property.Type.GetGenericArguments()[0] : typeof(object));
+
+            var enumerableType = typeof(IEnumerable<>).MakeGenericType(returnElementType);
+            var delegateType = typeof(Func<,>).MakeGenericType(source.ElementType, enumerableType);
+            lambda = Expression.Lambda(delegateType, lambda.Body, lambda.Parameters);
+
+            var selectManyExpression = Expression.Call(typeof(Queryable),
+                nameof(Queryable.SelectMany), [source.ElementType, returnElementType], source.Expression,
+                    Expression.Quote(lambda));
+
+            return source.Provider.CreateQuery(selectManyExpression);
+        }
+
+        /// <summary>
+        /// Projects each element of a sequence to an IEnumerable and flattens the resulting sequences into one sequence.
+        /// </summary>
+        public static IQueryable<GroupResult> GroupByMany<T>(this IQueryable<T> source, string[] properties)
+        {
+            var parameter = Expression.Parameter(source.ElementType, "x");
+
+            return GroupByMany(source,
+                properties.Select(p => Expression.Lambda<Func<T, object>>(Expression.Convert(GetNestedPropertyExpression(parameter, p), typeof(object)), parameter).Compile()).ToArray(),
+                    0);
+        }
+
+        private static IQueryable<GroupResult> GroupByMany<T>(IEnumerable<T> source, Func<T, object>[] lambdas, int index)
+        {
+            return source.GroupBy(lambdas[index]).Select(
+                g => new GroupResult
+                {
+                    Key = g.Key,
+                    Count = g.Count(),
+                    Items = g,
+                    Subgroups = index < lambdas.Length - 1 ? GroupByMany(g, lambdas, index + 1) : null
+                }).AsQueryable();
+        }
+
+        internal static string RemoveVariableReference(string expression)
+        {
+            // Regex pattern to match any variable reference in a lambda expression
+            string pattern = @"^\s*\b\w+\b\s*=>\s*";  // Matches "it => " or similar
+
+            // Remove the variable reference from the start
+            expression = Regex.Replace(expression, pattern, "").Trim();
+
+            // Remove remaining instances of the variable reference prefix (e.g., "it.")
+            pattern = @"\b\w+\."; // Matches "it.", "x.", etc.
+            expression = Regex.Replace(expression, pattern, "");
+
+            return expression.Trim();
+        }
+
+        /// <summary>
+        /// Sorts the elements of a sequence in ascending or descending order according to a key.
+        /// </summary>
+        /// <returns>A <see cref="IQueryable{T}"/> whose elements are sorted according to the specified <paramref name="selector"/>.</returns>
+        public static IOrderedQueryable<T> OrderBy<T>(this IQueryable<T> source, string selector = null)
+        {
+            selector = $"{selector}";
+
+            if (selector.Contains("=>"))
+            {
+                var identifierName = selector.Split("=>")[0];
+
+                selector = selector.Replace($"{identifierName}=>", "").Trim();
+
+                string methodAsc = "OrderBy";
+                string methodDesc = "OrderByDescending";
+
+                Expression expression = source.Expression;
+
+                foreach (var part in selector.Split(","))
+                {
+                    var lambda = ExpressionParser.ParseLambda<T>($"{identifierName.Trim()} => {part}");
+
+                    expression = Expression.Call(
+                        typeof(Queryable), part.Trim().ToLower().Contains(" desc") ? methodDesc : methodAsc,
+                        new Type[] { source.ElementType, lambda.ReturnType },
+                        expression, Expression.Quote(lambda));
+
+                    methodAsc = "ThenBy";
+                    methodDesc = "ThenByDescending";
+                }
+
+                return (IOrderedQueryable<T>)source.Provider.CreateQuery(expression);
+            }
+
+            return (IOrderedQueryable<T>)OrderBy((IQueryable)source, selector);
+        }
+
+        /// <summary>
+        /// Sorts the elements of a sequence in ascending or descending order according to a key.
+        /// </summary>
+        /// <returns>A <see cref="IQueryable"/> whose elements are sorted according to the specified <paramref name="selector"/>.</returns>
+        public static IQueryable OrderBy(this IQueryable source, string selector = null)
+        {
+            selector = selector.Contains("=>") ? RemoveVariableReference(selector) : selector;
+
+            var parameters = new ParameterExpression[] { Expression.Parameter(source.ElementType, "x") };
+
+            Expression expression = source.Expression;
+
+            string methodAsc = "OrderBy";
+            string methodDesc = "OrderByDescending";
+            string[] sortStrings = new string[] { "asc", "desc" }; 
+
+            foreach (var o in (selector ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var nameAndOrder = o.Trim();
+                var name = string.Join(" ", nameAndOrder.Split(' ').Where(i => !sortStrings.Contains(i.Trim()))).Trim();
+                var order = nameAndOrder.Split(' ').FirstOrDefault(i => sortStrings.Contains(i.Trim())) ?? sortStrings.First();
+
+                Expression property = !string.IsNullOrEmpty(nameAndOrder) ?
+                        GetNestedPropertyExpression(parameters.FirstOrDefault(), name) : parameters.FirstOrDefault();
+
+                expression = Expression.Call(
+                    typeof(Queryable), order.Equals(sortStrings.First(), StringComparison.OrdinalIgnoreCase) ? methodAsc : methodDesc,
+                    new Type[] { source.ElementType, property.Type },
+                    expression, Expression.Quote(Expression.Lambda(property, parameters)));
+
+                methodAsc = "ThenBy";
+                methodDesc = "ThenByDescending";
+            }
+
+            return source.Provider.CreateQuery(expression);
+        }
+
+        /// <summary>
+        /// Returns the first element of a sequence, or a default value if the sequence contains no elements.
+        /// </summary>
+        /// <param name="source">The <see cref="IQueryable"/> to return the first element of.</param>
+        /// <returns>default if source is empty; otherwise, the first element in source.</returns>
+        public static dynamic FirstOrDefault(this IQueryable source)
+        {
+            return source.Provider.Execute(Expression.Call(null,
+                typeof(Queryable).GetTypeInfo().GetDeclaredMethods(nameof(Queryable.FirstOrDefault)).FirstOrDefault(mi => mi.IsGenericMethod).MakeGenericMethod(source.ElementType),
+                source.Expression));
+        }
+
+        /// <summary>
+        /// Converts the elements of an <see cref="IQueryable"/> to the specified type.
+        /// </summary>
+        /// <param name="source">The <see cref="IQueryable"/> that contains the elements to be converted.</param>
+        /// <param name="type">The type to convert the elements of source to.</param>
+        /// <returns>An <see cref="IQueryable"/> that contains each element of the source sequence converted to the specified type.</returns>
+        public static IQueryable Cast(this IQueryable source, Type type)
+        {
+            return source.Provider.CreateQuery(Expression.Call(null,
+                typeof(Queryable).GetTypeInfo().GetDeclaredMethods(nameof(Queryable.Cast)).FirstOrDefault(mi => mi.IsGenericMethod).MakeGenericMethod(type),
+                source.Expression));
+        }
+
+        /// <summary>
+        /// Returns distinct elements from a sequence by using the default equality comparer to compare values.
+        /// </summary>
+        /// <param name="source">The sequence to remove duplicate elements from.</param>
+        /// <returns>An <see cref="IQueryable"/> that contains distinct elements from the source sequence.</returns>
+        public static IQueryable Distinct(this IQueryable source)
+        {
+            return source.Provider.CreateQuery(Expression.Call(null,
+                typeof(Queryable).GetTypeInfo().GetDeclaredMethods(nameof(Queryable.Distinct)).FirstOrDefault(mi => mi.IsGenericMethod).MakeGenericMethod(source.ElementType),
+                source.Expression));
+        }
+
+        /// <summary>
+        /// Filters using the specified filter descriptors.
+        /// </summary>
+        public static IQueryable Where(
+            this IQueryable source,
+            IEnumerable<FilterDescriptor> filters,
+            LogicalFilterOperator logicalFilterOperator,
+            FilterCaseSensitivity filterCaseSensitivity)
+        {
+            var whereMethod = typeof(QueryableExtension)
+                .GetMethods()
+                .First(m => m.Name == "Where" && m.IsGenericMethodDefinition && m.GetParameters().Any(p => p.ParameterType == typeof(IEnumerable<FilterDescriptor>)))
+                .MakeGenericMethod(source.ElementType);
+
+            return (IQueryable)whereMethod.Invoke(null, new object[] { source, filters, logicalFilterOperator, filterCaseSensitivity });
+        }
+
+        /// <summary>
+        /// Filters using the specified filter descriptors.
+        /// </summary>
+        public static IQueryable<T> Where<T>(this IQueryable<T> source, IEnumerable<FilterDescriptor> filters,
+            LogicalFilterOperator logicalFilterOperator, FilterCaseSensitivity filterCaseSensitivity)
+        {
+            if (filters == null || !filters.Any())
+                return source;
+
+            var parameter = Expression.Parameter(typeof(T), "x");
+            Expression combinedExpression = null;
+
+            foreach (var filter in filters)
+            {
+                var expression = GetExpression<T>(parameter, filter, filterCaseSensitivity, filter.Type);
+                if (expression == null) continue;
+
+                combinedExpression = combinedExpression == null
+                    ? expression
+                    : logicalFilterOperator == LogicalFilterOperator.And ?
+                        Expression.AndAlso(combinedExpression, expression) :
+                            Expression.OrElse(combinedExpression, expression);
+            }
+
+            if (combinedExpression == null)
+                return source;
+
+            var lambda = Expression.Lambda<Func<T, bool>>(combinedExpression, parameter);
+
+            return source.Where(lambda);
+        }
+
+        internal static Expression GetNestedPropertyExpression(Expression expression, string property, Type type = null)
+        {
+            var parts = property.Split(new char[] { '.' }, 2);
+            string currentPart = parts[0];
+            Expression member;
+
+            if (expression.Type.IsGenericType && typeof(IDictionary<,>).IsAssignableFrom(expression.Type.GetGenericTypeDefinition()) ||
+                typeof(IDictionary).IsAssignableFrom(expression.Type))
+            {
+                var key = currentPart.Split('"')[1];
+                var typeString = currentPart.Split('(')[0];
+
+                var indexer = Expression.Property(expression, expression.Type.GetProperty("Item"), Expression.Constant(key));
+                member = Expression.Convert(
+                    indexer,
+                    parts.Length > 1 ? indexer.Type : type ?? Type.GetType(typeString.EndsWith("?") ? $"System.Nullable`1[System.{typeString.TrimEnd('?')}]" : $"System.{typeString}") ?? typeof(object));
+            }
+            else if (currentPart.Contains("[")) // Handle array or list indexing
+            {
+                var indexStart = currentPart.IndexOf('[');
+                var propertyName = currentPart.Substring(0, indexStart);
+                var indexString = currentPart.Substring(indexStart + 1, currentPart.Length - indexStart - 2);
+
+                member = Expression.PropertyOrField(expression, propertyName);
+                if (int.TryParse(indexString, out int index))
+                {
+                    if (member.Type.IsArray)
+                    {
+                        member = Expression.ArrayIndex(member, Expression.Constant(index));
+                    }
+                    else if (member.Type.IsGenericType &&
+                             (member.Type.GetGenericTypeDefinition() == typeof(List<>) ||
+                              typeof(IList<>).IsAssignableFrom(member.Type.GetGenericTypeDefinition())))
+                    {
+                        var itemProperty = member.Type.GetProperty("Item");
+                        if (itemProperty != null)
+                        {
+                            member = Expression.Property(member, itemProperty, Expression.Constant(index));
+                        }
+                    }
+                }
+                else
+                {
+                    throw new ArgumentException($"Invalid index format: {indexString}");
+                }
+            }
+            else if (expression.Type.IsInterface)
+            {
+                member = Expression.Property(expression,
+                    new[] { expression.Type }.Concat(expression.Type.GetInterfaces()).FirstOrDefault(t => t.GetProperty(currentPart) != null),
+                    currentPart
+                );
+            }
+            else
+            {
+                member = Expression.PropertyOrField(expression, currentPart);
+            }
+
+            if (expression.Type.IsValueType && Nullable.GetUnderlyingType(expression.Type) == null)
+            {
+                expression = Expression.Convert(expression, typeof(object));
+            }
+
+            return parts.Length > 1 ? GetNestedPropertyExpression(member, parts[1], type) :
+                (Nullable.GetUnderlyingType(member.Type) != null || member.Type == typeof(string)) ?
+                    Expression.Condition(Expression.Equal(expression, Expression.Constant(null)), Expression.Constant(null, member.Type), member) :
+                    member;
+        }
+
+        internal static Expression GetExpression<T>(ParameterExpression parameter, FilterDescriptor filter, FilterCaseSensitivity filterCaseSensitivity, Type type)
+        {
+            Type valueType = filter.FilterValue != null ? filter.FilterValue.GetType() : null;
+            var isEnumerable = valueType != null && IsEnumerable(valueType) && valueType != typeof(string);
+
+            Type secondValueType = filter.SecondFilterValue != null ? filter.SecondFilterValue.GetType() : null;
+
+            Expression p = GetNestedPropertyExpression(parameter, filter.Property, type);
+
+            Expression property = GetNestedPropertyExpression(parameter, !isEnumerable && !IsEnumerable(p.Type) ? filter.FilterProperty ?? filter.Property : filter.Property, type);
+
+            Type collectionItemType = IsEnumerable(property.Type) && property.Type.IsGenericType ? property.Type.GetGenericArguments()[0] : null;
+
+            ParameterExpression collectionItemTypeParameter = collectionItemType != null ? Expression.Parameter(collectionItemType, "x") : null;
+
+            if (collectionItemType != null && !string.IsNullOrEmpty(filter.FilterProperty) && filter.Property != filter.FilterProperty)
+            {
+                property = GetNestedPropertyExpression(collectionItemTypeParameter, filter.FilterProperty);
+
+                filter.FilterOperator = filter.FilterOperator == FilterOperator.In ? FilterOperator.Contains :
+                    filter.FilterOperator == FilterOperator.NotIn ? FilterOperator.DoesNotContain : filter.FilterOperator;
+            }
+
+            var isEnum = !isEnumerable && (PropertyAccess.IsEnum(property.Type) || PropertyAccess.IsNullableEnum(property.Type));
+            var caseInsensitive = property.Type == typeof(string) && !isEnumerable && filterCaseSensitivity == FilterCaseSensitivity.CaseInsensitive;
+
+            var isEnumerableProperty = IsEnumerable(property.Type) && property.Type != typeof(string);
+
+            var constant = Expression.Constant(caseInsensitive ?
+                $"{filter.FilterValue}".ToLowerInvariant() :
+                    isEnum && !isEnumerable && filter.FilterValue != null ? Enum.ToObject(Nullable.GetUnderlyingType(property.Type) ?? property.Type, filter.FilterValue) : filter.FilterValue,
+                    !isEnum && isEnumerable ? valueType : isEnumerableProperty ? valueType: property.Type);
+
+            if (caseInsensitive && !isEnumerable)
+            {
+                property = Expression.Call(notNullCheck(property), typeof(string).GetMethod("ToLower", System.Type.EmptyTypes));
+            }
+
+            var secondConstant = filter.SecondFilterValue != null ?
+                Expression.Constant(caseInsensitive ?
+                $"{filter.SecondFilterValue}".ToLowerInvariant() :
+                    isEnum && filter.SecondFilterValue != null ? Enum.ToObject(Nullable.GetUnderlyingType(property.Type) ?? property.Type, filter.SecondFilterValue) : filter.SecondFilterValue,
+                    secondValueType != null && !isEnum && IsEnumerable(secondValueType) ? secondValueType : property.Type) : null;
+
+            Expression primaryExpression = filter.FilterOperator switch
+            {
+                FilterOperator.Equals => Expression.Equal(notNullCheck(property), constant),
+                FilterOperator.NotEquals => Expression.NotEqual(notNullCheck(property), constant),
+                FilterOperator.LessThan => Expression.LessThan(notNullCheck(property), constant),
+                FilterOperator.LessThanOrEquals => Expression.LessThanOrEqual(notNullCheck(property), constant),
+                FilterOperator.GreaterThan => Expression.GreaterThan(notNullCheck(property), constant),
+                FilterOperator.GreaterThanOrEquals => Expression.GreaterThanOrEqual(notNullCheck(property), constant),
+                FilterOperator.Contains => isEnumerable ?
+                    Expression.Call(typeof(Enumerable), nameof(Enumerable.Contains), new Type[] { property.Type }, constant, notNullCheck(property)) :
+                         isEnumerableProperty ? 
+                            Expression.Call(typeof(Enumerable), nameof(Enumerable.Contains), new Type[] { collectionItemType }, notNullCheck(property), constant) :
+                                Expression.Call(notNullCheck(property), typeof(string).GetMethod("Contains", new[] { typeof(string) }), constant),
+                FilterOperator.In => isEnumerable &&
+                                    isEnumerableProperty ?
+                    Expression.Call(typeof(Enumerable), nameof(Enumerable.Any), new Type[] { collectionItemType },
+                        Expression.Call(typeof(Enumerable), nameof(Enumerable.Intersect), new Type[] { collectionItemType }, constant, notNullCheck(property))) : Expression.Constant(true),
+                FilterOperator.DoesNotContain => isEnumerable ?
+                    Expression.Not(Expression.Call(typeof(Enumerable), nameof(Enumerable.Contains), new Type[] { property.Type }, constant, notNullCheck(property))) :
+                        isEnumerableProperty ?
+                            Expression.Not(Expression.Call(typeof(Enumerable), nameof(Enumerable.Contains), new Type[] { collectionItemType }, notNullCheck(property), constant)) : 
+                                Expression.Not(Expression.Call(notNullCheck(property), typeof(string).GetMethod("Contains", new[] { typeof(string) }), constant)),
+                FilterOperator.NotIn => isEnumerable &&
+                                    isEnumerableProperty ?
+                    Expression.Call(typeof(Enumerable), nameof(Enumerable.Any), new Type[] { collectionItemType },
+                        Expression.Call(typeof(Enumerable), nameof(Enumerable.Except), new Type[] { collectionItemType }, constant, notNullCheck(property))) : Expression.Constant(true),
+                FilterOperator.StartsWith => Expression.Call(notNullCheck(property), typeof(string).GetMethod("StartsWith", new[] { typeof(string) }), constant),
+                FilterOperator.EndsWith => Expression.Call(notNullCheck(property), typeof(string).GetMethod("EndsWith", new[] { typeof(string) }), constant),
+                FilterOperator.IsNull => Expression.Equal(property, Expression.Constant(null, property.Type)),
+                FilterOperator.IsNotNull => Expression.NotEqual(property, Expression.Constant(null, property.Type)),
+                FilterOperator.IsEmpty => Expression.Equal(property, Expression.Constant(String.Empty)),
+                FilterOperator.IsNotEmpty => Expression.NotEqual(property, Expression.Constant(String.Empty)),
+                _ => null
+            };
+
+            if (collectionItemType != null && primaryExpression != null &&
+                !(filter.FilterOperator == FilterOperator.In || filter.FilterOperator == FilterOperator.NotIn))
+            {
+                primaryExpression = Expression.Call(typeof(Enumerable), nameof(Enumerable.Any), new Type[] { collectionItemType },
+                    GetNestedPropertyExpression(parameter, filter.Property), Expression.Lambda(primaryExpression, collectionItemTypeParameter));
+            }
+
+            Expression secondExpression = null;
+            if (secondConstant != null)
+            {
+                secondExpression = filter.SecondFilterOperator switch
+                {
+                    FilterOperator.Equals => Expression.Equal(notNullCheck(property), secondConstant),
+                    FilterOperator.NotEquals => Expression.NotEqual(notNullCheck(property), secondConstant),
+                    FilterOperator.LessThan => Expression.LessThan(notNullCheck(property), secondConstant),
+                    FilterOperator.LessThanOrEquals => Expression.LessThanOrEqual(notNullCheck(property), secondConstant),
+                    FilterOperator.GreaterThan => Expression.GreaterThan(notNullCheck(property), secondConstant),
+                    FilterOperator.GreaterThanOrEquals => Expression.GreaterThanOrEqual(notNullCheck(property), secondConstant),
+                    FilterOperator.Contains => Expression.Call(notNullCheck(property), typeof(string).GetMethod("Contains", new[] { typeof(string) }), secondConstant),
+                    FilterOperator.DoesNotContain => Expression.Not(Expression.Call(notNullCheck(property), property.Type.GetMethod("Contains", new[] { typeof(string) }), secondConstant)),
+                    FilterOperator.StartsWith => Expression.Call(notNullCheck(property), typeof(string).GetMethod("StartsWith", new[] { typeof(string) }), secondConstant),
+                    FilterOperator.EndsWith => Expression.Call(notNullCheck(property), typeof(string).GetMethod("EndsWith", new[] { typeof(string) }), secondConstant),
+                    FilterOperator.IsNull => Expression.Equal(property, Expression.Constant(null, property.Type)),
+                    FilterOperator.IsNotNull => Expression.NotEqual(property, Expression.Constant(null, property.Type)),
+                    FilterOperator.IsEmpty => Expression.Equal(property, Expression.Constant(String.Empty)),
+                    FilterOperator.IsNotEmpty => Expression.NotEqual(property, Expression.Constant(String.Empty)),
+                    _ => null
+                };
+            }
+
+            if (collectionItemType != null && secondExpression != null &&
+                !(filter.SecondFilterOperator == FilterOperator.In || filter.SecondFilterOperator == FilterOperator.NotIn))
+            {
+                secondExpression = Expression.Call(typeof(Enumerable), nameof(Enumerable.Any), new Type[] { collectionItemType },
+                    GetNestedPropertyExpression(parameter, filter.Property), Expression.Lambda(secondExpression, collectionItemTypeParameter));
+            }
+
+            if (primaryExpression != null && secondExpression != null)
+            {
+                return filter.LogicalFilterOperator switch
+                {
+                    LogicalFilterOperator.And => Expression.AndAlso(primaryExpression, secondExpression),
+                    LogicalFilterOperator.Or => Expression.OrElse(primaryExpression, secondExpression),
+                    _ => primaryExpression
+                };
+            }
+
+            return primaryExpression;
+        }
 
         /// <summary>
         /// The linq filter operators
         /// </summary>
         internal static readonly IDictionary<FilterOperator, string> LinqFilterOperators = new Dictionary<FilterOperator, string>
         {
-            {FilterOperator.Equals, "="},
+            {FilterOperator.Equals, "=="},
             {FilterOperator.NotEquals, "!="},
             {FilterOperator.LessThan, "<"},
             {FilterOperator.LessThanOrEquals, "<="},
@@ -68,7 +499,7 @@ namespace Radzen
             {FilterOperator.StartsWith, "startswith"},
             {FilterOperator.EndsWith, "endswith"},
             {FilterOperator.Contains, "contains"},
-            {FilterOperator.DoesNotContain, "DoesNotContain"},
+            {FilterOperator.DoesNotContain, "contains"},
             {FilterOperator.IsNull, "eq"},
             {FilterOperator.IsEmpty, "eq"},
             {FilterOperator.IsNotNull, "ne"},
@@ -98,168 +529,78 @@ namespace Radzen
         /// <returns>System.String.</returns>
         public static string ToFilterString<T>(this IEnumerable<RadzenDataGridColumn<T>> columns)
         {
-            var columnsWithFilter = GetFilterableColumns(columns);
+            Func<RadzenDataGridColumn<T>, bool> canFilter = (c) => c.Filterable && c.FilterPropertyType != null &&
+               (!(c.GetFilterValue() == null || c.GetFilterValue() as string == string.Empty)
+                || c.GetFilterOperator() == FilterOperator.IsNotNull || c.GetFilterOperator() == FilterOperator.IsNull
+                || c.GetFilterOperator() == FilterOperator.IsEmpty || c.GetFilterOperator() == FilterOperator.IsNotEmpty)
+               && c.GetFilterProperty() != null;
 
-            if (columnsWithFilter.Any())
+            Func<RadzenDataGridColumn<T>, bool> canFilterCustom = (c) => c.Filterable && c.FilterPropertyType != null &&
+               (c.GetFilterOperator() == FilterOperator.Custom && c.GetCustomFilterExpression() != null)
+               && c.GetFilterProperty() != null;
+
+            var columnsToFilter = columns.Where(canFilter);
+            var grid = columns.FirstOrDefault()?.Grid;
+            var gridLogicalFilterOperator = grid != null ? grid.LogicalFilterOperator : LogicalFilterOperator.And;
+            var gridFilterCaseSensitivity = grid != null ? grid.FilterCaseSensitivity : FilterCaseSensitivity.Default;
+
+            var serializer = new ExpressionSerializer();
+            var filterExpression = "";
+
+            if (columnsToFilter.Any())
             {
-                var gridLogicalFilterOperator = columns.FirstOrDefault()?.Grid?.LogicalFilterOperator;
-                var gridBooleanOperator = gridLogicalFilterOperator == LogicalFilterOperator.And ? "and" : "or";
-
-                var whereList = new List<string>();
-                foreach (var column in columnsWithFilter)
+                var filters = columnsToFilter.Select(c => new FilterDescriptor()
                 {
-                    string value = "";
-                    string secondValue = "";
+                    Property = c.Property,
+                    FilterProperty = c.FilterProperty,
+                    Type = c.FilterPropertyType,
+                    FilterValue = c.GetFilterValue(),
+                    FilterOperator = c.GetFilterOperator(),
+                    SecondFilterValue = c.GetSecondFilterValue(),
+                    SecondFilterOperator = c.GetSecondFilterOperator(),
+                    LogicalFilterOperator = c.GetLogicalFilterOperator()
+                });
 
-                    var v = column.GetFilterValue();
-                    var sv = column.GetSecondFilterValue();
+                if (filters.Any())
+                {
+                    var parameter = Expression.Parameter(typeof(T), "x");
+                    Expression combinedExpression = null;
 
-                    if (column.GetFilterOperator() == FilterOperator.Custom)
+                    foreach (var filter in filters)
                     {
-                        var customFilterExpression = column.GetCustomFilterExpression();
-                        if (!string.IsNullOrEmpty(customFilterExpression))
-                        {
-                            whereList.Add(customFilterExpression);
-                        }
-                    }
-                    else if (PropertyAccess.IsDate(column.FilterPropertyType))
-                    {
-                        if (v != null)
-                        {
-                           
-                            value = 
-                                v is DateTime ? ((DateTime) v).ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture)
-                                : v is DateTimeOffset ? ((DateTimeOffset) v).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture)
-                                : 
-#if NET6_0_OR_GREATER
-                                v is DateOnly ? ((DateOnly) v).ToString("yyy-MM-dd", CultureInfo.InvariantCulture) : "";
-#else
-                                    "";
-#endif
-                        }
-                        if (sv != null)
-                        {
-                            secondValue = 
-                                sv is DateTime ? ((DateTime)sv).ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture) 
-                                : sv is DateTimeOffset ? ((DateTimeOffset)sv).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture) 
-                                : 
-#if NET6_0_OR_GREATER
-                                sv is DateOnly ? ((DateOnly) sv).ToString("yyy-MM-dd", CultureInfo.InvariantCulture) : "";
-#else
-                            "";
-#endif
-                        }
-                    }
-                    else if (PropertyAccess.IsEnum(column.FilterPropertyType) || PropertyAccess.IsNullableEnum(column.FilterPropertyType))
-                    {
-                        Type enumType = Enum.GetUnderlyingType(Nullable.GetUnderlyingType(column.FilterPropertyType) ?? column.FilterPropertyType);
-                        if (v != null)
-                        {
-                            value = Convert.ChangeType(v, enumType).ToString();
-                        }
-                        if (sv != null)
-                        {
-                            secondValue = Convert.ChangeType(sv, enumType).ToString();
-                        }
-                    }
-                    else if (IsEnumerable(column.FilterPropertyType) && column.FilterPropertyType != typeof(string))
-                    {
-                        var enumerableValue = ((IEnumerable)(v != null ? v : Enumerable.Empty<object>())).AsQueryable();
-                        var enumerableSecondValue = ((IEnumerable)(sv != null ? sv : Enumerable.Empty<object>())).AsQueryable();
-                        
-                        var enumerableValueAsString = "(" + String.Join(",",
-                                (enumerableValue.ElementType == typeof(string) ? 
-                                        enumerableValue.Cast<string>().Select(i => $@"""{i}""").Cast<object>() 
-                                            : PropertyAccess.IsDate(enumerableValue.ElementType) ?
-                                                enumerableValue.Cast<object>().Select(i => $@"DateTime(""{i}"")").Cast<object>() 
-                                                    : enumerableValue.Cast<object>())) + ")";
+                        var expression = GetExpression<T>(parameter, filter, gridFilterCaseSensitivity, filter.Type);
+                        if (expression == null) continue;
 
-                        var enumerableSecondValueAsString = "(" + String.Join(",",
-                                (enumerableSecondValue.ElementType == typeof(string) ?
-                                        enumerableSecondValue.Cast<string>().Select(i => $@"""{i}""").Cast<object>()
-                                            : PropertyAccess.IsDate(enumerableSecondValue.ElementType) ?
-                                                enumerableSecondValue.Cast<object>().Select(i => $@"DateTime(""{i}"")").Cast<object>()
-                                                    : enumerableSecondValue.Cast<object>())) + ")";
-
-                        if (enumerableValue?.Any() == true)
-                        {
-                            var columnFilterOperator = column.GetFilterOperator();
-                            var columnSecondFilterOperator = column.GetSecondFilterOperator();
-                            var linqOperator = LinqFilterOperators[column.GetFilterOperator()];
-                            if (linqOperator == null)
-                            {
-                                linqOperator = "==";
-                            }
-
-                            var booleanOperator = column.LogicalFilterOperator == LogicalFilterOperator.And ? "and" : "or";
-
-                            var property = PropertyAccess.GetProperty(column.GetFilterProperty());
-
-                            if (property.IndexOf(".") != -1)
-                            {
-                                property = $"({property})";
-                            }
-
-                            if (sv == null)
-                            {
-                                if (columnFilterOperator == FilterOperator.Contains || columnFilterOperator == FilterOperator.DoesNotContain)
-                                {
-                                    whereList.Add($@"{property} {(columnFilterOperator == FilterOperator.DoesNotContain ? "not " : "in")} {enumerableValueAsString}");
-                                }
-                                else if (columnFilterOperator == FilterOperator.In || columnFilterOperator == FilterOperator.NotIn)
-                                {
-	                                whereList.Add($@"({property}).{(columnFilterOperator == FilterOperator.NotIn ? "Except" : "Intersect")}({enumerableValueAsString}).Any()");
-                                }
-                            }
-                            else
-                            {
-                                if ((columnFilterOperator == FilterOperator.Contains || columnFilterOperator == FilterOperator.DoesNotContain) &&
-                                        (columnSecondFilterOperator == FilterOperator.Contains || columnSecondFilterOperator == FilterOperator.DoesNotContain))
-                                {
-                                    whereList.Add($@"{(columnFilterOperator == FilterOperator.DoesNotContain ? "!" : "")}({enumerableValueAsString}).Contains({property}) {booleanOperator} {(columnSecondFilterOperator == FilterOperator.DoesNotContain ? "!" : "")}({enumerableSecondValueAsString}).Contains({property})");
-                                }
-                                else if ((columnFilterOperator == FilterOperator.In || columnFilterOperator == FilterOperator.NotIn) &&
-                                         (columnSecondFilterOperator == FilterOperator.In || columnSecondFilterOperator == FilterOperator.NotIn))
-                                {
-	                                whereList.Add($@"({property}).{(columnFilterOperator == FilterOperator.NotIn ? "Except" : "Intersect")}({enumerableValueAsString}).Any() {booleanOperator} ({property}).{(columnSecondFilterOperator == FilterOperator.NotIn ? "Except" : "Intersect")}({enumerableSecondValueAsString}).Any()");
-                                }
-                            }
-                        }
-                    }
-                    else
-                    {
-                        value = (string)Convert.ChangeType(column.GetFilterValue(), typeof(string), CultureInfo.InvariantCulture);
-                        secondValue = (string)Convert.ChangeType(column.GetSecondFilterValue(), typeof(string), CultureInfo.InvariantCulture);
+                        combinedExpression = combinedExpression == null
+                            ? expression
+                            : gridLogicalFilterOperator == LogicalFilterOperator.And ?
+                                Expression.AndAlso(combinedExpression, expression) :
+                                    Expression.OrElse(combinedExpression, expression);
                     }
 
-                    if (!string.IsNullOrEmpty(value) || column.GetFilterOperator() == FilterOperator.IsNotNull
-                                                    || column.GetFilterOperator() == FilterOperator.IsNull
-                                                    || column.GetFilterOperator() == FilterOperator.IsEmpty
-                                                    || column.GetFilterOperator() == FilterOperator.IsNotEmpty)
+                    if (combinedExpression != null)
                     {
-                        var linqOperator = LinqFilterOperators[column.GetFilterOperator()];
-                        if (linqOperator == null)
-                        {
-                            linqOperator = "==";
-                        }
-
-                        var booleanOperator = column.LogicalFilterOperator == LogicalFilterOperator.And ? "and" : "or";
-
-                        if (string.IsNullOrEmpty(secondValue))
-                        {
-                            whereList.Add(GetColumnFilter(column, value));
-                        }
-                        else
-                        {
-                            whereList.Add($"({GetColumnFilter(column, value)} {booleanOperator} {GetColumnFilter(column, secondValue, true)})");
-                        }
+                        filterExpression = serializer.Serialize(Expression.Lambda<Func<T, bool>>(combinedExpression, parameter));
                     }
                 }
 
-                return string.Join($" {gridBooleanOperator} ", whereList.Where(i => !string.IsNullOrEmpty(i)));
             }
 
-            return "";
+            var columnsWithCustomFilter = columns.Where(canFilterCustom);
+
+            var customFilterExpression = "";
+
+            if (columnsWithCustomFilter.Any())
+            {
+                var expressions = columnsWithCustomFilter.Select(c => (c.GetCustomFilterExpression() ?? "").Replace(" or ", " || ").Replace(" and ", " && ")).Where(e => !string.IsNullOrEmpty(e)).ToList();
+                customFilterExpression = string.Join($"{(gridLogicalFilterOperator == LogicalFilterOperator.And ? " && " : " || ")}", expressions);
+
+                return !string.IsNullOrEmpty(filterExpression) && !string.IsNullOrEmpty(customFilterExpression) ?
+                    $"{filterExpression} {(gridLogicalFilterOperator == LogicalFilterOperator.And ? " && " : " || ")} {customFilterExpression}" :
+                        !string.IsNullOrEmpty(customFilterExpression) ? "it => " + customFilterExpression : filterExpression;
+            }
+
+            return filterExpression;
         }
 
         /// <summary>
@@ -271,368 +612,89 @@ namespace Radzen
         public static string ToFilterString<T>(this RadzenDataFilter<T> dataFilter)
         {
             Func<CompositeFilterDescriptor, bool> canFilter = (c) => dataFilter.properties.Where(col => col.Property == c.Property).FirstOrDefault()?.FilterPropertyType != null &&
-               (!(c.FilterValue == null || c.FilterValue as string == string.Empty)
-                || c.FilterOperator == FilterOperator.IsNotNull || c.FilterOperator == FilterOperator.IsNull
-                || c.FilterOperator == FilterOperator.IsEmpty || c.FilterOperator == FilterOperator.IsNotEmpty)
-               && c.Property != null;
+                           (!(c.FilterValue == null || c.FilterValue as string == string.Empty)
+                            || c.FilterOperator == FilterOperator.IsNotNull || c.FilterOperator == FilterOperator.IsNull
+                            || c.FilterOperator == FilterOperator.IsEmpty || c.FilterOperator == FilterOperator.IsNotEmpty)
+                           && c.Property != null;
 
             if (dataFilter.Filters.Concat(dataFilter.Filters.SelectManyRecursive(i => i.Filters ?? Enumerable.Empty<CompositeFilterDescriptor>())).Where(canFilter).Any())
             {
-                return CompositeFilterToFilterString<T>(dataFilter.Filters, dataFilter, dataFilter.LogicalFilterOperator);
+                var serializer = new ExpressionSerializer();
+
+                var filterExpressions = new List<Expression>();
+
+                var parameter = Expression.Parameter(typeof(T), "x");
+
+                foreach (var filter in dataFilter.Filters)
+                {
+                    AddWhereExpression<T>(parameter, filter, ref filterExpressions, dataFilter.FilterCaseSensitivity);
+                }
+
+                Expression combinedExpression = null;
+
+                foreach (var expression in filterExpressions)
+                {
+                    combinedExpression = combinedExpression == null
+                        ? expression
+                        : dataFilter.LogicalFilterOperator == LogicalFilterOperator.And ?
+                            Expression.AndAlso(combinedExpression, expression) :
+                                Expression.OrElse(combinedExpression, expression);
+                }
+
+                if (combinedExpression != null)
+                {
+                    return serializer.Serialize(Expression.Lambda<Func<T, bool>>(combinedExpression, parameter));
+                }
             }
+
             return "";
         }
 
         /// <summary>
-        /// Creates a Linq-compatible filter string for a list of CompositeFilterDescriptions
+        /// Converts a enumerable of CompositeFilterDescriptor to a Linq-compatibly filter string
         /// </summary>
         /// <typeparam name="T">The type that is being filtered</typeparam>
-        /// <param name="filters">The list if filters</param>
-        /// <param name="Datafilter">The RadzenDataFilter component</param>
-        /// <param name="filterOperator">Whether filter elements should be and-ed or or-ed</param>
-        /// <returns></returns>
-        private static string CompositeFilterToFilterString<T>(IEnumerable<CompositeFilterDescriptor> filters, RadzenDataFilter<T> Datafilter, LogicalFilterOperator filterOperator)
+        /// <param name="filters">The enumerable of CompositeFilterDescriptor </param>
+        /// <param name="logicalFilterOperator">The LogicalFilterOperator</param>
+        /// <param name="filterCaseSensitivity">The FilterCaseSensitivity</param>
+        /// <returns>A Linq-compatible filter string</returns>
+        public static string ToFilterString<T>(this IEnumerable<CompositeFilterDescriptor> filters, 
+            LogicalFilterOperator logicalFilterOperator = LogicalFilterOperator.And,
+            FilterCaseSensitivity filterCaseSensitivity = FilterCaseSensitivity.Default)
         {
-            if (filters.Any())
+            Func<CompositeFilterDescriptor, bool> canFilter = (c) => 
+                           (!(c.FilterValue == null || c.FilterValue as string == string.Empty)
+                            || c.FilterOperator == FilterOperator.IsNotNull || c.FilterOperator == FilterOperator.IsNull
+                            || c.FilterOperator == FilterOperator.IsEmpty || c.FilterOperator == FilterOperator.IsNotEmpty)
+                           && c.Property != null;
+
+            if (filters.Concat(filters.SelectManyRecursive(i => i.Filters ?? Enumerable.Empty<CompositeFilterDescriptor>())).Where(canFilter).Any())
             {
-                var LogicalFilterOperator = filterOperator;
-                var BooleanOperator = LogicalFilterOperator == LogicalFilterOperator.And ? "&&" : "||";
+                var serializer = new ExpressionSerializer();
 
-                var whereList = new List<string>();
-                foreach (var column in filters)
+                var filterExpressions = new List<Expression>();
+
+                var parameter = Expression.Parameter(typeof(T), "x");
+
+                foreach (var filter in filters)
                 {
-                    if (column.Filters is not null && column.Filters.Any())
-                    {
-                        whereList.Add($"({CompositeFilterToFilterString(column.Filters, Datafilter, column.LogicalFilterOperator)})");
-                    }
-                    if (column.Property is not null)
-                    {
-                        whereList.Add($"{GetColumnFilter(Datafilter, column, Datafilter.FilterCaseSensitivity == FilterCaseSensitivity.CaseInsensitive)}");
-                    }
+                    AddWhereExpression<T>(parameter, filter, ref filterExpressions, filterCaseSensitivity);
                 }
 
-                return string.Join($" {BooleanOperator} ", whereList.Where(i => !string.IsNullOrEmpty(i)));
-            }
+                Expression combinedExpression = null;
 
-            return "";
+                foreach (var expression in filterExpressions)
+                {
+                    combinedExpression = combinedExpression == null
+                        ? expression
+                        : logicalFilterOperator == LogicalFilterOperator.And ?
+                            Expression.AndAlso(combinedExpression, expression) :
+                                Expression.OrElse(combinedExpression, expression);
+                }
 
-        }
-
-        /// <summary>
-        /// Create a single linq-compatible filter string for one datafilter element (includes sub-lists)
-        /// </summary>
-        /// <typeparam name="T">The type that is being filtered</typeparam>
-        /// <param name="dataFilter">The RadzenDataFilter component</param>
-        /// <param name="column">The filter elements for which to create the filter string</param>
-        /// <param name="caseSensitive">Whether filtering is case sensitive or not</param>
-        /// <returns></returns>
-        private static string GetColumnFilter<T>(RadzenDataFilter<T> dataFilter, CompositeFilterDescriptor column, bool caseSensitive)
-        {
-            var property = column.Property;
-
-            if (property.Contains(".", StringComparison.CurrentCulture))
-            {
-                property = $"({property})";
-            }
-
-            var columnInfo = dataFilter.properties.Where(c => c.Property == column.Property).FirstOrDefault();
-            if (columnInfo == null) return "";
-
-            var columnType = columnInfo.FilterPropertyType;
-
-            var columnFilterOperator = column.FilterOperator;
-
-            var linqOperator = LinqFilterOperators[columnFilterOperator.Value];
-            linqOperator ??= "==";
-
-            var value = "";
-
-            if (columnType == typeof(string))
-            {
-                value = (string)Convert.ChangeType(column.FilterValue, typeof(string));
-                value = value?.Replace("\"", "\\\"");
-
-                string filterCaseSensitivityOperator = caseSensitive ? ".ToLower()" : "";
-
-                if (!string.IsNullOrEmpty(value) && column.FilterOperator == FilterOperator.Contains)
+                if (combinedExpression != null)
                 {
-                    return $@"({property} == null ? """" : {property}){filterCaseSensitivityOperator}.Contains(""{value}""{filterCaseSensitivityOperator})";
-                }
-                else if (!string.IsNullOrEmpty(value) && columnFilterOperator == FilterOperator.DoesNotContain)
-                {
-                    return $@"({property} == null ? """" : !{property}){filterCaseSensitivityOperator}.Contains(""{value}""{filterCaseSensitivityOperator})";
-                }
-                else if (!string.IsNullOrEmpty(value) && columnFilterOperator == FilterOperator.StartsWith)
-                {
-                    return $@"({property} == null ? """" : {property}){filterCaseSensitivityOperator}.StartsWith(""{value}""{filterCaseSensitivityOperator})";
-                }
-                else if (!string.IsNullOrEmpty(value) && columnFilterOperator == FilterOperator.EndsWith)
-                {
-                    return $@"({property} == null ? """" : {property}){filterCaseSensitivityOperator}.EndsWith(""{value}""{filterCaseSensitivityOperator})";
-                }
-                else if (!string.IsNullOrEmpty(value) && columnFilterOperator == FilterOperator.Equals)
-                {
-                    return $@"({property} == null ? """" : {property}){filterCaseSensitivityOperator} == ""{value}""{filterCaseSensitivityOperator}";
-                }
-                else if (!string.IsNullOrEmpty(value) && columnFilterOperator == FilterOperator.NotEquals)
-                {
-                    return $@"({property} == null ? """" : {property}){filterCaseSensitivityOperator} != ""{value}""{filterCaseSensitivityOperator}";
-                }
-                else if (columnFilterOperator == FilterOperator.IsNull)
-                {
-                    return property + " == null";
-                }
-                else if (columnFilterOperator == FilterOperator.IsEmpty)
-                {
-                    return property + @" == """"";
-                }
-                else if (columnFilterOperator == FilterOperator.IsNotEmpty)
-                {
-                    return property + @" != """"";
-                }
-                else if (columnFilterOperator == FilterOperator.IsNotNull)
-                {
-                    return property + @" != null";
-                }
-            }
-            else if (PropertyAccess.IsNumeric(columnType))
-            {
-                value = (string)Convert.ChangeType(column.FilterValue, typeof(string));
-
-                if (columnFilterOperator == FilterOperator.IsNull || columnFilterOperator == FilterOperator.IsNotNull)
-                {
-                    return $"{property} {linqOperator} null";
-                }
-                else if (columnFilterOperator == FilterOperator.IsEmpty || columnFilterOperator == FilterOperator.IsNotEmpty)
-                {
-                    return $@"{property} {linqOperator} """"";
-                }
-                else
-                {
-                    return $"{property} {linqOperator} {value}";
-                }
-            }
-            else if (columnType == typeof(bool) || columnType == typeof(bool?))
-            {
-                value = (string)Convert.ChangeType(column.FilterValue, typeof(string));
-
-                return $"{property} {linqOperator} {(columnFilterOperator == FilterOperator.IsNull || columnFilterOperator == FilterOperator.IsNotNull ? "null" : value)}";
-            }
-            else if (PropertyAccess.IsDate(columnType))
-            {
-                var v = column.FilterValue;
-                if (v != null)
-                {
-                    value = $@"DateTime(""{(v is DateTime time ? time.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture) : v is DateTimeOffset offset ? offset.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture) : "")}"")";
-                }
-            }
-            else if (PropertyAccess.IsEnum(columnType) || PropertyAccess.IsNullableEnum(columnType))
-            {
-                var v = column.FilterValue;
-                if (v != null)
-                {
-                    value = ((int)v).ToString();
-                }
-            }
-            else if (IsEnumerable(columnType) && columnType != typeof(string))
-            {
-                var v = column.FilterValue;
-                var enumerableValue = ((IEnumerable)(v ?? Enumerable.Empty<object>())).AsQueryable();
-
-                var enumerableValueAsString = "(" + String.Join(",",
-                                (enumerableValue.ElementType == typeof(string) ?
-                                        enumerableValue.Cast<string>().Select(i => $@"""{i}""").Cast<object>()
-                                            : PropertyAccess.IsDate(enumerableValue.ElementType) ?
-                                                enumerableValue.Cast<object>().Select(i => $@"DateTime(""{i}"")").Cast<object>()
-                                                    : enumerableValue.Cast<object>())) + ")";
-
-
-                if (enumerableValue?.Any() == true)
-                {
-                    if (property.Contains("."))
-                    {
-                        property = $"({property})";
-                    }
-
-                    if (columnFilterOperator == FilterOperator.Contains || columnFilterOperator == FilterOperator.DoesNotContain)
-                    {
-                        return $@"{property} {(columnFilterOperator == FilterOperator.DoesNotContain ? "not " : "in")} {enumerableValueAsString}";
-                    }
-                    else if (columnFilterOperator == FilterOperator.In || columnFilterOperator == FilterOperator.NotIn)
-                    {
-                        return $@"({property}).{(columnFilterOperator == FilterOperator.NotIn ? "Except" : "Intersect")}({enumerableValueAsString}).Any()";
-                    }
-                }
-            }
-            else
-            {
-                value = (string)Convert.ChangeType(column.FilterValue, typeof(string), CultureInfo.InvariantCulture);
-            }
-
-            if (!string.IsNullOrEmpty(value) || column.FilterOperator == FilterOperator.IsNotNull
-                                            || column.FilterOperator == FilterOperator.IsNull
-                                            || column.FilterOperator == FilterOperator.IsEmpty
-                                            || column.FilterOperator == FilterOperator.IsNotEmpty)
-            {
-                return $"({property} {linqOperator} {(columnFilterOperator == FilterOperator.IsNull || columnFilterOperator == FilterOperator.IsNotNull ? "null" : value)})";
-            }
-
-            return "";
-        }
-
-        /// <summary>
-        /// Gets the column filter.
-        /// </summary>
-        /// <typeparam name="T"></typeparam>
-        /// <param name="column">The column.</param>
-        /// <param name="value">The value.</param>
-        /// <param name="second">if set to <c>true</c> [second].</param>
-        /// <returns>System.String.</returns>
-        private static string GetColumnFilter<T>(RadzenDataGridColumn<T> column, string value, bool second = false)
-        {
-            var property = PropertyAccess.GetProperty(column.GetFilterProperty());
-            var propertyType = !string.IsNullOrEmpty(property) ? PropertyAccess.GetPropertyType(typeof(T), property) : null;
-
-            if (property.IndexOf(".") != -1)
-            {
-                property = $"({property})";
-            }
-            bool hasNp = property.Contains("np(");
-            string npProperty = hasNp ? property : (propertyType != null ? Nullable.GetUnderlyingType(propertyType) != null : true) ? $@"np({property})" : property;
-
-            var columnFilterOperator = !second ? column.GetFilterOperator() : column.GetSecondFilterOperator();
-
-            if (columnFilterOperator == FilterOperator.Custom)
-            {
-                return "";
-            }
-
-            var linqOperator = LinqFilterOperators[columnFilterOperator];
-            if (linqOperator == null)
-            {
-                linqOperator = "==";
-            }
-            bool isDateOnly = false;
-
-#if NET6_0_OR_GREATER
-            if (column.FilterPropertyType == typeof(DateOnly) || column.FilterPropertyType == typeof(DateOnly?))
-            {
-                isDateOnly = true;
-            }
-#endif
-
-            if (column.FilterPropertyType == typeof(string))
-            {
-                string filterCaseSensitivityOperator = column.Grid.FilterCaseSensitivity == FilterCaseSensitivity.CaseInsensitive ? ".ToLower()" : "";
-                value = value?.Replace("\"", "\\\"");
-
-                if (!string.IsNullOrEmpty(value) && columnFilterOperator == FilterOperator.Contains)
-                {
-                    return $@"({property} == null ? """" : {property}){filterCaseSensitivityOperator}.Contains(""{value}""{filterCaseSensitivityOperator})";
-                }
-                else if (!string.IsNullOrEmpty(value) && columnFilterOperator == FilterOperator.DoesNotContain)
-                {
-                    return $@"!({property} == null ? """" : {property}){filterCaseSensitivityOperator}.Contains(""{value}""{filterCaseSensitivityOperator})";
-                }
-                else if (!string.IsNullOrEmpty(value) && columnFilterOperator == FilterOperator.StartsWith)
-                {
-                    return $@"({property} == null ? """" : {property}){filterCaseSensitivityOperator}.StartsWith(""{value}""{filterCaseSensitivityOperator})";
-                }
-                else if (!string.IsNullOrEmpty(value) && columnFilterOperator == FilterOperator.EndsWith)
-                {
-                    return $@"({property} == null ? """" : {property}){filterCaseSensitivityOperator}.EndsWith(""{value}""{filterCaseSensitivityOperator})";
-                }
-                else if (!string.IsNullOrEmpty(value) && columnFilterOperator == FilterOperator.Equals)
-                {
-                    return $@"({property} == null ? """" : {property}){filterCaseSensitivityOperator} == ""{value}""{filterCaseSensitivityOperator}";
-                }
-                else if (!string.IsNullOrEmpty(value) && columnFilterOperator == FilterOperator.NotEquals)
-                {
-                    return $@"({property} == null ? """" : {property}){filterCaseSensitivityOperator} != ""{value}""{filterCaseSensitivityOperator}";
-                }
-                else if (columnFilterOperator == FilterOperator.IsNull)
-                {
-                    return npProperty + " == null";
-                }
-                else if (columnFilterOperator == FilterOperator.IsEmpty)
-                {
-                    return npProperty + @" == """"";
-                }
-                else if (columnFilterOperator == FilterOperator.IsNotEmpty)
-                {
-                    return npProperty + @" != """"";
-                }
-                else if (columnFilterOperator == FilterOperator.IsNotNull)
-                {
-                    return npProperty + @" != null";
-                }
-            }
-            else if (PropertyAccess.IsNumeric(column.FilterPropertyType))
-            {
-                if (columnFilterOperator == FilterOperator.IsNull || columnFilterOperator == FilterOperator.IsNotNull)
-                {
-                    return $"{property} {linqOperator} null";
-                }
-                else if (columnFilterOperator == FilterOperator.IsEmpty || columnFilterOperator == FilterOperator.IsNotEmpty)
-                {
-                    return $@"{property} {linqOperator} """"";
-                }
-                else
-                {
-                    return $"{property} {linqOperator} {value}";
-                }
-            }
-            else if (column.FilterPropertyType == typeof(DateTime) ||
-                    column.FilterPropertyType == typeof(DateTime?) ||
-                    column.FilterPropertyType == typeof(DateTimeOffset) ||
-                    column.FilterPropertyType == typeof(DateTimeOffset?) || isDateOnly)
-            {
-                if (columnFilterOperator == FilterOperator.IsNull || columnFilterOperator == FilterOperator.IsNotNull)
-                {
-                    return $"{property} {linqOperator} null";
-                }
-                else if (columnFilterOperator == FilterOperator.IsEmpty || columnFilterOperator == FilterOperator.IsNotEmpty)
-                {
-                    return $@"{property} {linqOperator} """"";
-                }
-                else
-                {
-                    var dateTimeValue = DateTime.Parse(value, CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind);
-                    var finalDate = dateTimeValue.TimeOfDay == TimeSpan.Zero ? dateTimeValue.Date : dateTimeValue;
-                    var dateFormat = dateTimeValue.TimeOfDay == TimeSpan.Zero ? "yyyy-MM-dd" : "yyyy-MM-ddTHH:mm:ss.fffZ";
-                  
-                    string dateFunction = "DateTime"; //fallback to datetime, if it's an offset or dateonly use that
-                    if (column.FilterPropertyType == typeof(DateTimeOffset) || column.FilterPropertyType == typeof(DateTimeOffset?))
-                        dateFunction = "DateTimeOffset";
-                    else
-                    {
-#if NET6_0_OR_GREATER
-                        if (column.FilterPropertyType == typeof(DateOnly) || column.FilterPropertyType == typeof(DateOnly?))
-                            dateFunction = "DateOnly";
-#endif
-                    }
-
-                    
-                    return $@"{property} {linqOperator} {dateFunction}(""{finalDate.ToString(dateFormat, CultureInfo.InvariantCulture)}"")";
-                }
-            }
-            else if (column.FilterPropertyType == typeof(bool) || column.FilterPropertyType == typeof(bool?))
-            {
-                return $"{property} {linqOperator} {(columnFilterOperator == FilterOperator.IsNull || columnFilterOperator == FilterOperator.IsNotNull ? "null" : value)}";
-            }
-            else if (column.FilterPropertyType == typeof(Guid) || column.FilterPropertyType == typeof(Guid?))
-            {
-                if (columnFilterOperator == FilterOperator.IsNull || columnFilterOperator == FilterOperator.IsNotNull)
-                {
-                    return $"{property} {linqOperator} null";
-                }
-                else if (columnFilterOperator == FilterOperator.IsEmpty || columnFilterOperator == FilterOperator.IsNotEmpty)
-                {
-                    return $@"{property} {linqOperator} """"";
-                }
-                else
-                {
-                    return $@"{property} {linqOperator} Guid(""{value}"")";
+                    return serializer.Serialize(Expression.Lambda<Func<T, bool>>(combinedExpression, parameter));
                 }
             }
 
@@ -656,7 +718,9 @@ namespace Radzen
             var value = IsEnumerable(column.FilterPropertyType) && column.FilterPropertyType != typeof(string)
                 ? null
                 : (string)Convert.ChangeType(filterValue is DateTimeOffset ?
-                            ((DateTimeOffset)filterValue).UtcDateTime : filterValue, typeof(string), CultureInfo.InvariantCulture);
+                            ((DateTimeOffset)filterValue).UtcDateTime : filterValue is DateOnly ?
+                                ((DateOnly)filterValue).ToString("yyy-MM-dd", CultureInfo.InvariantCulture) :
+                                    filterValue, typeof(string), CultureInfo.InvariantCulture);
 
             if (column.Grid.FilterCaseSensitivity == FilterCaseSensitivity.CaseInsensitive && column.FilterPropertyType == typeof(string))
             {
@@ -725,19 +789,19 @@ namespace Radzen
                     (enumerableValue.ElementType == typeof(string) ? enumerableValue.Cast<string>()
                         .Select(i => $@"i/{property} eq '{i}'").Cast<object>() : enumerableValue.Cast<object>().Select(i => $@"i/{property} eq {i}").Cast<object>()));
 
-                if (enumerableValue.Any() && columnFilterOperator == FilterOperator.Contains)
+                if (enumerableValue.Cast<object>().Any() && columnFilterOperator == FilterOperator.Contains)
                 {
                     return $"{property} in {enumerableValueAsString}";
                 }
-                else if (enumerableValue.Any() && columnFilterOperator == FilterOperator.DoesNotContain)
+                else if (enumerableValue.Cast<object>().Any() && columnFilterOperator == FilterOperator.DoesNotContain)
                 {
                     return $"not({property} in {enumerableValueAsString})";
                 }
-                else if (enumerableValue.Any() && columnFilterOperator == FilterOperator.In)
+                else if (enumerableValue.Cast<object>().Any() && columnFilterOperator == FilterOperator.In)
                 {
                     return $"{column.Property}/any(i:{enumerableValueAsStringOrForAny})";
                 }
-                else if (enumerableValue.Any() && columnFilterOperator == FilterOperator.NotIn)
+                else if (enumerableValue.Cast<object>().Any() && columnFilterOperator == FilterOperator.NotIn)
                 {
                     return $"not({column.Property}/any(i: {enumerableValueAsStringOrForAny}))";
                 }
@@ -771,7 +835,9 @@ namespace Radzen
             else if (column.FilterPropertyType == typeof(DateTime) ||
                     column.FilterPropertyType == typeof(DateTime?) ||
                     column.FilterPropertyType == typeof(DateTimeOffset) ||
-                    column.FilterPropertyType == typeof(DateTimeOffset?))
+                    column.FilterPropertyType == typeof(DateTimeOffset?) ||
+                    column.FilterPropertyType == typeof(DateOnly) ||
+                    column.FilterPropertyType == typeof(DateOnly?))
             {
                 if (columnFilterOperator == FilterOperator.IsNull || columnFilterOperator == FilterOperator.IsNotNull)
                 {
@@ -783,7 +849,7 @@ namespace Radzen
                 }
                 else
                 {
-                    return $"{property} {odataFilterOperator} {DateTime.Parse(value, CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind).ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture)}";
+                    return $"{property} {odataFilterOperator} {(column.FilterPropertyType == typeof(DateOnly) || column.FilterPropertyType == typeof(DateOnly?) ? value : DateTime.Parse(value, CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind).ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture))}";
                 }
             }
             else if (column.FilterPropertyType == typeof(Guid) || column.FilterPropertyType == typeof(Guid?))
@@ -858,7 +924,7 @@ namespace Radzen
         /// </summary>
         public static bool IsEnumerable(Type type)
         {
-            return typeof(IEnumerable).IsAssignableFrom(type) || typeof(IEnumerable<>).IsAssignableFrom(type);
+            return (typeof(IEnumerable).IsAssignableFrom(type) || typeof(IEnumerable<>).IsAssignableFrom(type)) && type != typeof(string);
         }
 
         /// <summary>
@@ -873,166 +939,40 @@ namespace Radzen
             Func<RadzenDataGridColumn<T>, bool> canFilter = (c) => c.Filterable && c.FilterPropertyType != null &&
                (!(c.GetFilterValue() == null || c.GetFilterValue() as string == string.Empty)
                 || c.GetFilterOperator() == FilterOperator.IsNotNull || c.GetFilterOperator() == FilterOperator.IsNull
-                || c.GetFilterOperator() == FilterOperator.IsEmpty || c.GetFilterOperator() == FilterOperator.IsNotEmpty
-                || (c.GetFilterOperator() == FilterOperator.Custom && c.GetCustomFilterExpression() != null))
+                || c.GetFilterOperator() == FilterOperator.IsEmpty || c.GetFilterOperator() == FilterOperator.IsNotEmpty)
                && c.GetFilterProperty() != null;
 
-            if (columns.Where(canFilter).Any())
+            Func<RadzenDataGridColumn<T>, bool> canFilterCustom = (c) => c.Filterable && c.FilterPropertyType != null &&
+               (c.GetFilterOperator() == FilterOperator.Custom && c.GetCustomFilterExpression() != null)
+               && c.GetFilterProperty() != null;
+
+            var columnsToFilter = columns.Where(canFilter);
+            var grid = columns.FirstOrDefault()?.Grid;
+            var gridLogicalFilterOperator = grid != null ? grid.LogicalFilterOperator : LogicalFilterOperator.And;
+            var gridFilterCaseSensitivity = grid != null ? grid.FilterCaseSensitivity : FilterCaseSensitivity.Default;
+
+            if (columnsToFilter.Any())
             {
-                var gridLogicalFilterOperator = columns.FirstOrDefault()?.Grid?.LogicalFilterOperator;
-                var gridBooleanOperator = gridLogicalFilterOperator == LogicalFilterOperator.And ? "and" : "or";
-
-                var index = 0;
-                var whereList = new Dictionary<string, IEnumerable<object>>();
-                foreach (var column in columns.Where(canFilter))
+                source = source.Where(columnsToFilter.Select(c => new FilterDescriptor()
                 {
-                    if (column.GetFilterOperator() == FilterOperator.Custom)
-                    {
-                        var customFilterExpression = column.GetCustomFilterExpression();
-                        if (!string.IsNullOrEmpty(customFilterExpression))
-                        {
-                            whereList.Add(customFilterExpression, Enumerable.Empty<object>());
-                        }
-                    }
-                    else
-                    {
-                        var property = PropertyAccess.GetProperty(column.GetFilterProperty());
+                    Property = c.Property,
+                    FilterProperty = c.FilterProperty,
+                    Type = c.FilterPropertyType,
+                    FilterValue = c.GetFilterValue(),
+                    FilterOperator = c.GetFilterOperator(),
+                    SecondFilterValue = c.GetSecondFilterValue(),
+                    SecondFilterOperator = c.GetSecondFilterOperator(),
+                    LogicalFilterOperator = c.GetLogicalFilterOperator()
+                }), gridLogicalFilterOperator, gridFilterCaseSensitivity);
+            }
 
-                    if (property.IndexOf(".") != -1)
-                    {
-                        property = $"({property})";
-                    }
+            var columnsWithCustomFilter = columns.Where(canFilterCustom);
 
-                    if (column.FilterPropertyType == typeof(string) &&
-                        !(column.GetFilterOperator() == FilterOperator.IsNotNull || column.GetFilterOperator() == FilterOperator.IsNull
-                            || column.GetFilterOperator() == FilterOperator.IsEmpty || column.GetFilterOperator() == FilterOperator.IsNotEmpty))
-                    {
-                        property = $@"({property} == null ? """" : {property})";
-                    }
-
-                    string filterCaseSensitivityOperator = column.FilterPropertyType == typeof(string)
-                           && column.GetFilterOperator() != FilterOperator.IsNotNull && column.GetFilterOperator() != FilterOperator.IsNull
-                           && column.GetFilterOperator() != FilterOperator.IsEmpty && column.GetFilterOperator() != FilterOperator.IsNotEmpty
-                           && column.Grid.FilterCaseSensitivity == FilterCaseSensitivity.CaseInsensitive ? ".ToLower()" : "";
-
-
-                    var comparison = LinqFilterOperators[column.GetFilterOperator()];
-
-                    var booleanOperator = column.LogicalFilterOperator == LogicalFilterOperator.And ? "and" : "or";
-
-                    if (column.GetSecondFilterValue() == null)
-                    {
-                        if (comparison == "StartsWith" || comparison == "EndsWith" || comparison == "Contains")
-                        {
-                            if (IsEnumerable(column.FilterPropertyType) && column.FilterPropertyType != typeof(string) && comparison == "Contains")
-                            {
-                                if (column.Property != column.FilterProperty && !string.IsNullOrEmpty(column.FilterProperty))
-                                {
-                                    whereList.Add($@"{column.Property}.Any(i => i.{column.FilterProperty}{filterCaseSensitivityOperator}.Contains(@{index}{filterCaseSensitivityOperator}))", new object[] { column.GetFilterValue() });
-                                }
-                                else
-                                {
-                                    whereList.Add($@"(@{index}).Contains({property})", new object[] { column.GetFilterValue() });
-                                }
-                            }
-                            else
-                            {
-                                if (IsEnumerable(column.FilterPropertyType) && column.FilterPropertyType != typeof(string) && column.Property != column.FilterProperty && !string.IsNullOrEmpty(column.FilterProperty))
-                                {
-                                    whereList.Add($@"{column.Property}.Any(i => i.{column.FilterProperty}{filterCaseSensitivityOperator}.{comparison}(@{index}{filterCaseSensitivityOperator}))", new object[] { column.GetFilterValue() });
-                                }
-                                else
-                                {
-                                    whereList.Add($@"{property}{filterCaseSensitivityOperator}.{comparison}(@{index}{filterCaseSensitivityOperator})", new object[] { column.GetFilterValue() });
-                                }
-                            }
-
-                            index++;
-                        }
-                        else if (comparison == "DoesNotContain")
-                        {
-                            if (IsEnumerable(column.FilterPropertyType) && column.FilterPropertyType != typeof(string) && comparison == "DoesNotContain")
-                            {
-                                if (column.Property != column.FilterProperty && !string.IsNullOrEmpty(column.FilterProperty))
-                                {
-                                    whereList.Add($@"!{column.Property}.Any(i => i.{column.FilterProperty}{filterCaseSensitivityOperator}.Contains(@{index}{filterCaseSensitivityOperator}))", new object[] { column.GetFilterValue() });
-                                }
-                                else
-                                {
-                                    whereList.Add($@"!(@{index}).Contains({property})", new object[] { column.GetFilterValue() });
-                                }
-                            }
-                            else
-                            {
-                                whereList.Add($@"!{property}{filterCaseSensitivityOperator}.Contains(@{index}{filterCaseSensitivityOperator})", new object[] { column.GetFilterValue() });
-                            }
-
-                            index++;
-                        }
-                        else if (comparison == "In" || comparison == "NotIn")
-                        {
-                            if (IsEnumerable(column.FilterPropertyType) && column.FilterPropertyType != typeof(string) &&
-                                    IsEnumerable(column.PropertyType) && column.PropertyType != typeof(string))
-                            {
-                                whereList.Add($@"{(comparison == "NotIn" ? "!" : "")}{property}.Any(i => i in @{index})", new object[] { column.GetFilterValue() });
-                                index++;
-                            }
-                            else if (IsEnumerable(column.FilterPropertyType) && column.FilterPropertyType != typeof(string) &&
-                                column.Property != column.FilterProperty && !string.IsNullOrEmpty(column.FilterProperty))
-                            {
-                                whereList.Add($@"{(comparison == "NotIn" ? "!" : "")}{column.Property}.Any(i => i.{column.FilterProperty} in @{index})", new object[] { column.GetFilterValue() });
-                                index++;
-                            }
-                        }
-                        else if (IsEnumerable(column.FilterPropertyType) && column.FilterPropertyType != typeof(string) && column.Property != column.FilterProperty && !string.IsNullOrEmpty(column.FilterProperty))
-                        {
-                            whereList.Add($@"{column.Property}.Any(i => i.{column.FilterProperty}{filterCaseSensitivityOperator} {comparison} @{index}{filterCaseSensitivityOperator})", new object[] { column.GetFilterValue() });
-                        }
-                        else if (!(IsEnumerable(column.FilterPropertyType) && column.FilterPropertyType != typeof(string)))
-                        {
-                            whereList.Add($@"{property}{filterCaseSensitivityOperator} {comparison} @{index}{filterCaseSensitivityOperator}", new object[] { column.GetFilterValue() });
-                            index++;
-                        }
-                    }
-                    else
-                    {
-                        var secondComparison = LinqFilterOperators[column.GetSecondFilterOperator()];
-
-                        if (IsEnumerable(column.FilterPropertyType) && column.FilterPropertyType != typeof(string) &&
-                            (comparison == "Contains" || comparison == "DoesNotContain") &&
-                                (secondComparison == "Contains" || secondComparison == "DoesNotContain"))
-                        {
-                            var firstFilter = $@"{(comparison == "DoesNotContain" ? "!" : "")}(@{index}).Contains({property})";
-                            index++;
-
-                            var secondFilter = $@"{(secondComparison == "DoesNotContain" ? "!" : "")}(@{index}).Contains({property})";
-                            index++;
-
-                            whereList.Add($@"({firstFilter} {booleanOperator} {secondFilter})", new object[] { column.GetFilterValue(), column.GetSecondFilterValue() });
-                        }
-                        else
-                        {
-                            var firstFilter = comparison == "StartsWith" || comparison == "EndsWith" || comparison == "Contains" ?
-                                $@"{property}{filterCaseSensitivityOperator}.{comparison}(@{index}{filterCaseSensitivityOperator})" :
-                                comparison == "DoesNotContain" ? $@"!{property}{filterCaseSensitivityOperator}.Contains(@{index}{filterCaseSensitivityOperator})" :
-                                $@"{property}{filterCaseSensitivityOperator} {comparison} @{index}{filterCaseSensitivityOperator}";
-                            index++;
-
-                            var secondFilter = secondComparison == "StartsWith" || secondComparison == "EndsWith" || secondComparison == "Contains" ?
-                                $@"{property}{filterCaseSensitivityOperator}.{secondComparison}(@{index}{filterCaseSensitivityOperator})" :
-                                secondComparison == "DoesNotContain" ? $@"!{property}{filterCaseSensitivityOperator}.Contains(@{index}{filterCaseSensitivityOperator})" :
-                                $@"{property}{filterCaseSensitivityOperator} {secondComparison} @{index}{filterCaseSensitivityOperator}";
-                            index++;
-
-                            whereList.Add($@"({firstFilter} {booleanOperator} {secondFilter})", new object[] { column.GetFilterValue(), column.GetSecondFilterValue() });
-                        }
-                    }
-                }
-                }
-
-                return whereList.Keys.Any() ?
-                    source.Where(DynamicLinqCustomTypeProvider.ParsingConfig, string.Join($" {gridBooleanOperator} ", whereList.Keys), whereList.Values.SelectMany(i => i.ToArray()).ToArray())
-                    : source;
+            if (columnsToFilter.Any())
+            {
+                var expressions = columnsWithCustomFilter.Select(c => (c.GetCustomFilterExpression() ?? "").Replace(" or ", " || ").Replace(" and ", " && ")).Where(e => !string.IsNullOrEmpty(e)).ToList();
+                source = expressions.Any() ?
+                    System.Linq.Dynamic.Core.DynamicExtensions.Where(source, "it => " + string.Join($"{(gridLogicalFilterOperator == LogicalFilterOperator.And ? " && " : " || ")}", expressions)) : source;
             }
 
             return source;
@@ -1055,37 +995,109 @@ namespace Radzen
 
             if (dataFilter.Filters.Concat(dataFilter.Filters.SelectManyRecursive(i => i.Filters ?? Enumerable.Empty<CompositeFilterDescriptor>())).Where(canFilter).Any())
             {
-                var index = 0;
-                var filterExpressions = new List<string>();
-                var filterValues = new List<object[]>();
+                var filterExpressions = new List<Expression>();
+
+                var parameter = Expression.Parameter(typeof(T), "x");
 
                 foreach (var filter in dataFilter.Filters)
                 {
-                    AddWhereExpression(canFilter, filter, ref filterExpressions, ref filterValues, ref index, dataFilter);
+                    AddWhereExpression<T>(parameter, filter, ref filterExpressions, dataFilter.FilterCaseSensitivity);
                 }
 
-                return filterExpressions.Any() ?
-                    source.Where(DynamicLinqCustomTypeProvider.ParsingConfig, string.Join($" {dataFilter.LogicalFilterOperator.ToString().ToLower()} ", filterExpressions), filterValues.SelectMany(i => i.ToArray()).ToArray())
-                    : source;
+                Expression combinedExpression = null;
+
+                foreach (var expression in filterExpressions)
+                {
+                    combinedExpression = combinedExpression == null
+                        ? expression
+                        : dataFilter.LogicalFilterOperator == LogicalFilterOperator.And ?
+                            Expression.AndAlso(combinedExpression, expression) :
+                                Expression.OrElse(combinedExpression, expression);
+                }
+
+                if (combinedExpression != null)
+                {
+                    var lambda = Expression.Lambda<Func<T, bool>>(combinedExpression, parameter);
+                    return source.Where(lambda);
+                }
             }
 
             return source;
         }
 
-        private static void AddWhereExpression<T>(Func<CompositeFilterDescriptor, bool> canFilter, CompositeFilterDescriptor filter, ref List<string> filterExpressions, ref List<object[]> filterValues, ref int index, RadzenDataFilter<T> dataFilter)
+        /// <summary>
+        /// Wheres the specified filters.
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <returns>IQueryable&lt;T&gt;.</returns>
+        public static IQueryable<T> Where<T>(this IQueryable<T> source, IEnumerable<CompositeFilterDescriptor> filters, LogicalFilterOperator logicalFilterOperator, FilterCaseSensitivity filterCaseSensitivity)
+        {
+            Func<CompositeFilterDescriptor, bool> canFilter = (c) =>
+               (!(c.FilterValue == null || c.FilterValue as string == string.Empty)
+                || c.FilterOperator == FilterOperator.IsNotNull || c.FilterOperator == FilterOperator.IsNull
+                || c.FilterOperator == FilterOperator.IsEmpty || c.FilterOperator == FilterOperator.IsNotEmpty)
+               && c.Property != null;
+
+            if (filters.Where(canFilter).Any())
+            {
+                var filterExpressions = new List<Expression>();
+
+                var parameter = Expression.Parameter(typeof(T), "x");
+
+                foreach (var filter in filters)
+                {
+                    AddWhereExpression<T>(parameter, filter, ref filterExpressions, filterCaseSensitivity);
+                }
+
+                Expression combinedExpression = null;
+
+                foreach (var expression in filterExpressions)
+                {
+                    combinedExpression = combinedExpression == null
+                        ? expression
+                        : logicalFilterOperator == LogicalFilterOperator.And ?
+                            Expression.AndAlso(combinedExpression, expression) :
+                                Expression.OrElse(combinedExpression, expression);
+                }
+
+                if (combinedExpression != null)
+                {
+                    var lambda = Expression.Lambda<Func<T, bool>>(combinedExpression, parameter);
+                    return source.Where(lambda);
+                }
+            }
+
+            return source;
+        }
+
+        private static void AddWhereExpression<T>(ParameterExpression parameter, CompositeFilterDescriptor filter, ref List<Expression> filterExpressions, FilterCaseSensitivity filterCaseSensitivity)
         {
             if (filter.Filters != null)
             {
-                var innerFilterExpressions = new List<string>();
+                var innerFilterExpressions = new List<Expression>();
 
                 foreach (var f in filter.Filters)
                 {
-                    AddWhereExpression(canFilter, f, ref innerFilterExpressions, ref filterValues, ref index, dataFilter);
+                    AddWhereExpression<T>(parameter, f, ref innerFilterExpressions, filterCaseSensitivity);
                 }
 
                 if (innerFilterExpressions.Any())
                 {
-                    filterExpressions.Add("(" + string.Join($" {filter.LogicalFilterOperator.ToString().ToLower()} ", innerFilterExpressions) + ")");
+                    Expression combinedExpression = null;
+
+                    foreach (var expression in innerFilterExpressions)
+                    {
+                        combinedExpression = combinedExpression == null
+                            ? expression
+                            : filter.LogicalFilterOperator == LogicalFilterOperator.And ?
+                                Expression.AndAlso(combinedExpression, expression) :
+                                    Expression.OrElse(combinedExpression, expression);
+                    }
+
+                    if (combinedExpression != null)
+                    {
+                        filterExpressions.Add(combinedExpression);
+                    }
                 }
             }
             else
@@ -1097,93 +1109,20 @@ namespace Radzen
                     return;
                 }
 
-                var property = PropertyAccess.GetProperty(filter.Property);
-
-                if (property.IndexOf(".") != -1)
+                var f = new FilterDescriptor()
                 {
-                    property = $"({property})";
-                }
+                    Property = filter.Property,
+                    FilterProperty = filter.FilterProperty,
+                    FilterValue = filter.FilterValue,
+                    FilterOperator = filter.FilterOperator ?? FilterOperator.Equals,
+                    LogicalFilterOperator = filter.LogicalFilterOperator,
+                    Type = filter.Type
+                };
 
-                var column = dataFilter.properties.Where(c => c.Property == filter.Property).FirstOrDefault();
-                if (column == null) return;
-
-                if (column.FilterPropertyType == typeof(string) &&
-                    !(filter.FilterOperator == FilterOperator.IsNotNull || filter.FilterOperator == FilterOperator.IsNull
-                        || filter.FilterOperator == FilterOperator.IsEmpty || filter.FilterOperator == FilterOperator.IsNotEmpty))
+                var expression = GetExpression<T>(parameter, f, filterCaseSensitivity, f.Type);
+                if (expression != null)
                 {
-                    property = $@"({property} == null ? """" : {property})";
-                }
-
-                string filterCaseSensitivityOperator = column.FilterPropertyType == typeof(string)
-                       && filter.FilterOperator != FilterOperator.IsNotNull && filter.FilterOperator != FilterOperator.IsNull
-                       && filter.FilterOperator != FilterOperator.IsEmpty && filter.FilterOperator != FilterOperator.IsNotEmpty
-                       && dataFilter.FilterCaseSensitivity == FilterCaseSensitivity.CaseInsensitive ? ".ToLower()" : "";
-
-
-                var comparison = LinqFilterOperators[filter.FilterOperator.Value];
-
-                if (comparison == "StartsWith" || comparison == "EndsWith" || comparison == "Contains")
-                {
-                    if (column.FilterPropertyType == typeof(string) && filter.FilterValue == null)
-                    {
-                        filter.FilterValue = "";
-                    }
-
-                    if (IsEnumerable(column.FilterPropertyType) && column.FilterPropertyType != typeof(string) && comparison == "Contains")
-                    {
-                        filterExpressions.Add($@"(@{index}).Contains({property})");
-                        filterValues.Add(new object[] { filter.FilterValue  });
-                    }
-                    else
-                    {
-                        filterExpressions.Add($@"{property}{filterCaseSensitivityOperator}.{comparison}(@{index}{filterCaseSensitivityOperator})");
-                        filterValues.Add(new object[] { filter.FilterValue });
-                    }
-
-                    index++;
-                }
-                else if (comparison == "DoesNotContain")
-                {
-                    if (column.FilterPropertyType == typeof(string) && filter.FilterValue == null)
-                    {
-                        filter.FilterValue = "";
-                    }
-
-                    if (IsEnumerable(column.FilterPropertyType) && column.FilterPropertyType != typeof(string) && comparison == "DoesNotContain")
-                    {
-                        filterExpressions.Add($@"!(@{index}).Contains({property})");
-                        filterValues.Add(new object[] { filter.FilterValue });
-                    }
-                    else
-                    {
-                        filterExpressions.Add($@"!{property}{filterCaseSensitivityOperator}.Contains(@{index}{filterCaseSensitivityOperator})");
-                        filterValues.Add(new object[] { filter.FilterValue });
-                    }
-
-                    index++;
-                }
-                else if (comparison == "In" || comparison == "NotIn")
-                {
-                    if (IsEnumerable(column.FilterPropertyType) && column.FilterPropertyType != typeof(string))
-                    {
-                        filterExpressions.Add($@"{(comparison == "NotIn" ? "!" : "")}{property}.Any(i => i in @{index})");
-                        filterValues.Add(new object[] { filter.FilterValue });
-
-                        index++;
-                    }
-                }
-                else if (!(IsEnumerable(column.FilterPropertyType) && column.FilterPropertyType != typeof(string)))
-                {
-                    var value = filter.FilterValue;
-
-                    if (column.FilterPropertyType == typeof(DateTimeOffset) || column.FilterPropertyType == typeof(DateTimeOffset?))
-                    {
-                        value = filter.FilterValue != null ? (object)(new DateTimeOffset((DateTime)filter.FilterValue, TimeSpan.Zero)) : null;
-                    }
-
-                    filterExpressions.Add($@"{property}{filterCaseSensitivityOperator} {comparison} @{index}{filterCaseSensitivityOperator}");
-                    filterValues.Add(new object[] { value });
-                    index++;
+                    filterExpressions.Add(expression);
                 }
             }
         }
@@ -1204,55 +1143,54 @@ namespace Radzen
             if (!string.IsNullOrEmpty(value))
             {
                 var ignoreCase = cs == FilterCaseSensitivity.CaseInsensitive;
+                var parameter = Expression.Parameter(source.ElementType, "it");
+                var inMemory = typeof(EnumerableQuery).IsAssignableFrom(source.GetType());
 
-                var query = new List<string>();
+                Expression propertyExpression = parameter;
 
                 if (!string.IsNullOrEmpty(property))
                 {
-                    query.Add(property);
+                    propertyExpression = GetNestedPropertyExpression(parameter, property);
                 }
 
-                if (typeof(EnumerableQuery).IsAssignableFrom(source.GetType()))
+                if (string.IsNullOrEmpty(property) && inMemory || 
+                    propertyExpression != null && propertyExpression.Type != typeof(string))
                 {
-                    query.Add("ToString()");
+                    propertyExpression = Expression.Call(string.IsNullOrEmpty(property) && inMemory ? notNullCheck(parameter) : notNullCheck(propertyExpression), "ToString", Type.EmptyTypes);
                 }
 
                 if (ignoreCase)
                 {
-                    query.Add("ToLower()");
+                    propertyExpression = Expression.Call(notNullCheck(propertyExpression), "ToLower", Type.EmptyTypes);
                 }
 
-                query.Add($"{Enum.GetName(typeof(StringFilterOperator), op)}(@0)");
+                var constantExpression = Expression.Constant(ignoreCase ? value.ToLower() : value, typeof(string));
+                Expression comparisonExpression = null;
 
-                var search = ignoreCase ? value.ToLower() : value;
-
-                if (source.ElementType == typeof(Enum))
+                switch (op)
                 {
-                    result = source.Cast<Enum>()
-                        .Where((Func<Enum, bool>)(i =>
-                        {
-                            var v = ignoreCase ? i.GetDisplayDescription().ToLower() : i.GetDisplayDescription();
-
-                            if (op == StringFilterOperator.Contains)
-                            {
-                                return v.Contains(search);
-                            }
-                            else if (op == StringFilterOperator.StartsWith)
-                            {
-                                return v.StartsWith(search);
-                            }
-                            else if (op == StringFilterOperator.EndsWith)
-                            {
-                                return v.EndsWith(search);
-                            }
-
-                            return v == search;
-                        })).AsQueryable();
+                    case StringFilterOperator.Contains:
+                        comparisonExpression = Expression.Call(notNullCheck(propertyExpression), "Contains", null, constantExpression);
+                        break;
+                    case StringFilterOperator.StartsWith:
+                        comparisonExpression = Expression.Call(notNullCheck(propertyExpression), "StartsWith", null, constantExpression);
+                        break;
+                    case StringFilterOperator.EndsWith:
+                        comparisonExpression = Expression.Call(notNullCheck(propertyExpression), "EndsWith", null, constantExpression);
+                        break;
+                    default:
+                        comparisonExpression = Expression.Equal(propertyExpression, constantExpression);
+                        break;
                 }
-                else
-                {
-                    result = source.Where(DynamicLinqCustomTypeProvider.ParsingConfig, string.Join(".", query), search);
-                }
+
+                var lambda = Expression.Lambda(comparisonExpression, parameter);
+                result = source.Provider.CreateQuery(Expression.Call(
+                    typeof(Queryable),
+                    "Where",
+                    new Type[] { source.ElementType },
+                    source.Expression,
+                    lambda
+                ));
             }
             else
             {
@@ -1261,7 +1199,6 @@ namespace Radzen
 
             return result;
         }
-
 
         /// <summary>
         /// Converts to OData filter expression.
@@ -1282,7 +1219,13 @@ namespace Radzen
 
                 foreach (var filter in dataFilter.Filters)
                 {
-                    AddODataExpression(canFilter, filter, ref filterExpressions, dataFilter);
+                    var ft = dataFilter.properties.Where(col => col.Property == filter.Property).FirstOrDefault()?.FilterPropertyType;
+                    if (ft != null && ft != filter.Type)
+                    {
+                        filter.Type = ft;
+                    }
+
+                    AddODataExpression<T>(canFilter, filter, ref filterExpressions, dataFilter.LogicalFilterOperator, dataFilter.FilterCaseSensitivity);
                 }
 
                 return filterExpressions.Any() ?
@@ -1292,7 +1235,43 @@ namespace Radzen
             return "";
         }
 
-        private static void AddODataExpression<T>(Func<CompositeFilterDescriptor, bool> canFilter, CompositeFilterDescriptor filter, ref List<string> filterExpressions, RadzenDataFilter<T> dataFilter)
+        /// <summary>
+        /// Converts a enumerable of CompositeFilterDescriptor to a OData-compatibly filter string
+        /// </summary>
+        /// <param name="filters">The enumerable of CompositeFilterDescriptor </param>
+        /// <param name="logicalFilterOperator">The LogicalFilterOperator</param>
+        /// <param name="filterCaseSensitivity">The FilterCaseSensitivity</param>
+        /// <returns>A OData-compatible filter string</returns>
+        public static string ToODataFilterString<T>(this IEnumerable<CompositeFilterDescriptor> filters,
+            LogicalFilterOperator logicalFilterOperator = LogicalFilterOperator.And,
+            FilterCaseSensitivity filterCaseSensitivity = FilterCaseSensitivity.Default)
+        {
+            Func<CompositeFilterDescriptor, bool> canFilter = (c) => 
+               (!(c.FilterValue == null || c.FilterValue as string == string.Empty)
+                || c.FilterOperator == FilterOperator.IsNotNull || c.FilterOperator == FilterOperator.IsNull
+                || c.FilterOperator == FilterOperator.IsEmpty || c.FilterOperator == FilterOperator.IsNotEmpty)
+               && c.Property != null;
+
+            if (filters.Concat(filters.SelectManyRecursive(i => i.Filters ?? Enumerable.Empty<CompositeFilterDescriptor>())).Where(canFilter).Any())
+            {
+                var filterExpressions = new List<string>();
+
+                foreach (var filter in filters)
+                {
+                    AddODataExpression<T>(canFilter, filter, ref filterExpressions, logicalFilterOperator, filterCaseSensitivity);
+                }
+
+                return filterExpressions.Any() ?
+                    string.Join($" {logicalFilterOperator.ToString().ToLower()} ", filterExpressions)
+                    : "";
+            }
+            return "";
+        }
+
+        private static void AddODataExpression<T>(Func<CompositeFilterDescriptor, bool> canFilter, 
+            CompositeFilterDescriptor filter, ref List<string> filterExpressions, 
+            LogicalFilterOperator logicalFilterOperator = LogicalFilterOperator.And,
+            FilterCaseSensitivity filterCaseSensitivity = FilterCaseSensitivity.Default)
         {
             if (filter.Filters != null)
             {
@@ -1300,7 +1279,7 @@ namespace Radzen
 
                 foreach (var f in filter.Filters)
                 {
-                    AddODataExpression(canFilter, f, ref innerFilterExpressions, dataFilter);
+                    AddODataExpression<T>(canFilter, f, ref innerFilterExpressions, logicalFilterOperator, filterCaseSensitivity);
                 }
 
                 if (innerFilterExpressions.Any())
@@ -1318,10 +1297,15 @@ namespace Radzen
 
                 var property = filter.Property.Replace('.', '/');
 
-                var column = dataFilter.properties.Where(c => c.Property == filter.Property).FirstOrDefault();
-                if (column == null) return;
+                var parameter = Expression.Parameter(typeof(T), "x");
 
-                if (dataFilter.FilterCaseSensitivity == FilterCaseSensitivity.CaseInsensitive && column.FilterPropertyType == typeof(string))
+                var propertyExpression = GetNestedPropertyExpression(parameter, filter.Property);
+
+                if (propertyExpression == null) return;
+
+                var filterPropertyType = filter.Type ?? propertyExpression.Type;
+
+                if (filterCaseSensitivity == FilterCaseSensitivity.CaseInsensitive && filterPropertyType == typeof(string))
                 {
                     property = $"tolower({property})";
                 }
@@ -1329,27 +1313,27 @@ namespace Radzen
                 if (filter.FilterOperator == FilterOperator.StartsWith || filter.FilterOperator == FilterOperator.EndsWith
                     || filter.FilterOperator == FilterOperator.Contains || filter.FilterOperator == FilterOperator.DoesNotContain)
                 {
-                    if (IsEnumerable(column.FilterPropertyType) && column.FilterPropertyType != typeof(string) &&
+                    if (IsEnumerable(filterPropertyType) && filterPropertyType != typeof(string) &&
                         (filter.FilterOperator == FilterOperator.Contains || filter.FilterOperator == FilterOperator.DoesNotContain))
                     {
                         var enumerableValue = ((IEnumerable)(filter.FilterValue != null ? filter.FilterValue : Enumerable.Empty<object>())).AsQueryable();
-                        var firstItemType = enumerableValue.Any() ? enumerableValue.FirstOrDefault().GetType() : typeof(object);
+                        var firstItemType = enumerableValue.Cast<object>().Any() ? enumerableValue.FirstOrDefault().GetType() : typeof(object);
 
                         var enumerableValueAsString = "(" + String.Join(",",
                                 (enumerableValue.ElementType == typeof(string) || firstItemType == typeof(string) ? enumerableValue.Cast<string>().Select(i => $@"'{i}'").Cast<object>() : enumerableValue.Cast<object>())) + ")";
 
-                        if (enumerableValue.Any() && filter.FilterOperator == FilterOperator.Contains)
+                        if (enumerableValue.Cast<object>().Any() && filter.FilterOperator == FilterOperator.Contains)
                         {
                             filterExpressions.Add($"{property} in {enumerableValueAsString}");
                         }
-                        else if (enumerableValue.Any() && filter.FilterOperator == FilterOperator.DoesNotContain)
+                        else if (enumerableValue.Cast<object>().Any() && filter.FilterOperator == FilterOperator.DoesNotContain)
                         {
                             filterExpressions.Add($"not({property} in {enumerableValueAsString})");
                         }
                     }
                     else
                     {
-                        var expression = dataFilter.FilterCaseSensitivity == FilterCaseSensitivity.CaseInsensitive ?
+                        var expression = filterCaseSensitivity == FilterCaseSensitivity.CaseInsensitive ?
                             $"{ODataFilterOperators[filter.FilterOperator.Value]}({property}, tolower('{filter.FilterValue}'))" :
                             $"{ODataFilterOperators[filter.FilterOperator.Value]}({property}, '{filter.FilterValue}')";
 
@@ -1363,7 +1347,7 @@ namespace Radzen
                 }
                 else
                 {
-                    if (IsEnumerable(column.FilterPropertyType) && column.FilterPropertyType != typeof(string))
+                    if (IsEnumerable(filterPropertyType) && filterPropertyType != typeof(string))
                         return;
 
                     var value = $"{filter.FilterValue}";
@@ -1376,11 +1360,11 @@ namespace Radzen
                     {
                         value = $"''";
                     }
-                    else if (column.FilterPropertyType == typeof(string) || PropertyAccess.IsEnum(column.FilterPropertyType) || PropertyAccess.IsNullableEnum(column.FilterPropertyType))
+                    else if (filterPropertyType == typeof(string) || PropertyAccess.IsEnum(filterPropertyType) || PropertyAccess.IsNullableEnum(filterPropertyType))
                     {
                         value = $"'{value}'";
                     }
-                    else if (column.FilterPropertyType == typeof(DateTime) || column.FilterPropertyType == typeof(DateTime?))
+                    else if (filterPropertyType == typeof(DateTime) || filterPropertyType == typeof(DateTime?))
                     {
                         try
                         {
@@ -1393,7 +1377,7 @@ namespace Radzen
 
                         value = $"{DateTime.Parse(value, CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind).ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture)}";
                     }
-                    else if (column.FilterPropertyType == typeof(bool) || column.FilterPropertyType == typeof(bool?))
+                    else if (filterPropertyType == typeof(bool) || filterPropertyType == typeof(bool?))
                     {
                         value = $"{value?.ToLower()}";
                     }

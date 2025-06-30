@@ -1,6 +1,7 @@
 @import 'variables';
 @import 'mixins';
-$dark: true;
+$base: true;
+$theme-dark: true;
 $standard: true;
 $theme-name: standard-dark;
 
@@ -392,6 +393,8 @@ $tabs-tab-hover-background-color: var(--rz-base-600) !default;
 $grid-border-radius: 0 !default;
 $grid-cell-border: var(--rz-border-base-700);
 $grid-data-border-shadow: 0 1px 0 0 var(--rz-base-600), 0 -1px 0 0 var(--rz-base-600);
+$grid-cell-focus-background-color: var(--rz-primary-lighter) !default;
+$grid-cell-focus-color: var(--rz-on-primary-lighter) !default;
 $grid-hover-background-color: var(--rz-primary-lighter) !default;
 $grid-hover-color: var(--rz-on-primary-lighter) !default;
 $grid-selected-background-color: var(--rz-primary-lighter) !default;
@@ -414,6 +417,8 @@ $grid-clear-filter-button-background-color: var(--rz-base) !default;
 $grid-clear-filter-button-color: var(--rz-on-base) !default;
 $grid-header-filter-icon-hover-color: var(--rz-text-title-color) !default;
 $grid-header-filter-icon-active-color: var(--rz-primary) !default;
+$grid-simple-filter-icon-active-color: var(--rz-on-primary-lighter) !default;
+$grid-simple-filter-icon-active-background-color: var(--rz-primary-lighter) !default;
 $grid-sort-icon-color: var(--rz-text-color) !default;
 $grid-border: none !default;
 $grid-shadow: none !default;
@@ -586,6 +591,12 @@ $timepicker-button-background-color: var(--rz-primary) !default;
 $timepicker-button-color: var(--rz-on-primary) !default;
 $timepicker-button-border-radius: var(--rz-border-radius) !default;
 
+// TimeSpanPicker
+$timespanpicker-trigger-icon-color: var(--rz-text-color) !default;
+$timespanpicker-trigger-icon-hover-color: var(--rz-text-title-color) !default;
+$timespanpicker-panel-background-color: var(--rz-base-background-color) !default;
+$timespanpicker-popup-shadow: $rz-shadow-3 !default;
+
 // Fieldset
 $fieldset-border: var(--rz-border-base-700) !default;
 $fieldset-border-radius: var(--rz-border-radius) !default;
@@ -688,6 +699,7 @@ $listbox-filter-border: var(--rz-border-base-700) !default;
 
 // Rating
 $rating-color: var(--rz-text-tertiary-color) !default;
+$rating-focus-color: var(--rz-primary-light) !default;
 $rating-disabled-opacity: 0.5 !default;
 
 // Upload
@@ -754,6 +766,12 @@ $rz-timeline-line-color: var(--rz-base-600) !default;
 
 // Layout
 $layout-background-color: transparent !default;
+
+// Toc
+$rz-toc-link-hover-color: var(--rz-primary) !default;
+$rz-toc-link-selected-color: var(--rz-primary-light) !default;
+$rz-toc-link-selected-indicator-color: var(--rz-primary-light) !default;
+$rz-toc-horizontal-link-selected-color: var(--rz-primary-light) !default;
 
 @import 'fonts';
 @import 'components';

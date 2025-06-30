@@ -8,7 +8,7 @@
 
 @if (Visible)
 {
-    <div @ref="@Element" @attributes="Attributes" class="@GetCssClass()" @onfocus="@((args) => OnFocus(args))"
+    <div @ref="@Element" @attributes="Attributes" class="@GetCssClass()" @onfocus=@this.AsNonRenderingEventHandler(OnFocus)
          style="@Style" tabindex="@(Disabled ? "-1" : $"{TabIndex}")" id="@GetId()" @onclick="@(args => OpenPopup("ArrowDown", false, true))" @onclick:preventDefault @onclick:stopPropagation
          @onkeydown="@((args) => OnKeyPress(args))" @onkeydown:preventDefault="@preventKeydown">
         <div class="rz-helper-hidden-accessible">
@@ -37,7 +37,7 @@
         }
         else if ((selectedItems.Count > 0 || SelectedValue is IEnumerable && !(SelectedValue is string)) && Multiple)
         {
-            var itemsToUse = SelectedValue is IEnumerable && !(SelectedValue is string) ? ((IEnumerable)SelectedValue).Cast<object>().ToList() : selectedItems;
+            var itemsToUse = SelectedValue is IEnumerable && !(SelectedValue is string) ? ((IEnumerable)SelectedValue).Cast<object>().ToHashSet() : selectedItems;
             @if (itemsToUse.Count < MaxSelectedLabels && Chips)
             {
                 <div class="rz-dropdown-chips-wrapper">
@@ -112,7 +112,7 @@
         </div>
 
         <div id="@PopupID" class="@(Multiple ? "rz-multiselect-panel" : "rz-dropdown-panel")"
-             style="display:none;min-width:400px;padding:0px;">
+             style="@PopupStyle">
             <div class="rz-lookup-panel" @onkeydown="@CloseOnEscape">
                 @if (AllowFiltering || HeaderTemplate != null)
                 {
@@ -141,7 +141,7 @@
                 }
                 @if (Template != null)
                 {
-                    <RadzenDataGrid EmptyTemplate=@EmptyTemplate FooterTemplate=@FooterTemplate AllowVirtualization="@IsVirtualizationAllowed()" VirtualizationOverscanCount="@GetVirtualizationOverscanCount()" AllowRowSelectOnRowClick="@AllowRowSelectOnRowClick" PagerHorizontalAlign="@PagerHorizontalAlign" PagerAlwaysVisible="@PagerAlwaysVisible" Responsive="@Responsive" AllowColumnResize="@AllowColumnResize" ColumnWidth="@ColumnWidth" @ref="grid" Data="@(LoadData.HasDelegate ? (Data != null ? Data.Cast<object>() : Enumerable.Empty<object>()) : pagedData)" Count="@(LoadData.HasDelegate ? Count : count)" LoadData="@OnLoadData"
+                    <RadzenDataGrid GridLines=@GridLines EmptyTemplate=@EmptyTemplate FooterTemplate=@FooterTemplate AllowVirtualization="@IsVirtualizationAllowed()" VirtualizationOverscanCount="@GetVirtualizationOverscanCount()" AllowRowSelectOnRowClick="@AllowRowSelectOnRowClick" PagerHorizontalAlign="@PagerHorizontalAlign" PagerAlwaysVisible="@PagerAlwaysVisible" Responsive="@Responsive" AllowColumnResize="@AllowColumnResize" ColumnWidth="@ColumnWidth" @ref="grid" Data="@(LoadData.HasDelegate ? (Data != null ? Data.Cast<object>() : Enumerable.Empty<object>()) : pagedData)" Count="@(LoadData.HasDelegate ? Count : count)" LoadData="@OnLoadData"
                                     TItem="object" CellRender="@OnCellRender" RowRender="@OnRowRender" ShowPagingSummary="@ShowPagingSummary" PagingSummaryFormat="@PagingSummaryFormat" PageSize="@PageSize" PageNumbersCount="@PageNumbersCount" AllowPaging="@(!IsVirtualizationAllowed())" AllowSorting="@AllowSorting" RowSelect="@OnRowSelect" Style="@(IsVirtualizationAllowed() ? "height:285px" : "")" Density="@Density" IsLoading="@IsLoading" FirstPageTitle="@FirstPageTitle" FirstPageAriaLabel="@FirstPageAriaLabel" PrevPageAriaLabel="@PrevPageAriaLabel" PrevPageTitle="@PrevPageTitle" NextPageAriaLabel="@NextPageAriaLabel" NextPageTitle="@NextPageTitle" LastPageAriaLabel="@LastPageAriaLabel" LastPageTitle="@LastPageTitle" PageAriaLabelFormat="@PageAriaLabelFormat" PageTitleFormat="@PageTitleFormat">
                         <Columns>
                             <RadzenDataGridColumn TItem="object" Property="@TextProperty" Title="@TextProperty" Type="typeof(string)">
@@ -156,7 +156,7 @@
                 {
                     if (!string.IsNullOrEmpty(TextProperty) || Columns != null)
                     {
-                        <RadzenDataGrid EmptyTemplate=@EmptyTemplate FooterTemplate=@FooterTemplate AllowVirtualization="@IsVirtualizationAllowed()" VirtualizationOverscanCount="@GetVirtualizationOverscanCount()" AllowRowSelectOnRowClick="@AllowRowSelectOnRowClick" PagerHorizontalAlign="@PagerHorizontalAlign" PagerAlwaysVisible="@PagerAlwaysVisible" Responsive="@Responsive" AllowColumnResize="@AllowColumnResize" ColumnWidth="@ColumnWidth" EmptyText="@EmptyText" @ref="grid" Data="@(LoadData.HasDelegate ? (Data != null ? Data.Cast<object>() : Enumerable.Empty<object>()) : pagedData)" Count="@(LoadData.HasDelegate ? Count : count)" LoadData="@OnLoadData"
+                        <RadzenDataGrid GridLines=@GridLines EmptyTemplate=@EmptyTemplate FooterTemplate=@FooterTemplate AllowVirtualization="@IsVirtualizationAllowed()" VirtualizationOverscanCount="@GetVirtualizationOverscanCount()" AllowRowSelectOnRowClick="@AllowRowSelectOnRowClick" PagerHorizontalAlign="@PagerHorizontalAlign" PagerAlwaysVisible="@PagerAlwaysVisible" Responsive="@Responsive" AllowColumnResize="@AllowColumnResize" ColumnWidth="@ColumnWidth" EmptyText="@EmptyText" @ref="grid" Data="@(LoadData.HasDelegate ? (Data != null ? Data.Cast<object>() : Enumerable.Empty<object>()) : pagedData)" Count="@(LoadData.HasDelegate ? Count : count)" LoadData="@OnLoadData"
                                         TItem="object" CellRender="@OnCellRender" RowRender="@OnRowRender" ShowPagingSummary="@ShowPagingSummary" PagingSummaryFormat="@PagingSummaryFormat" PageSize="@PageSize" PageNumbersCount="@PageNumbersCount" AllowPaging="@(!IsVirtualizationAllowed())" AllowSorting="@AllowSorting" RowSelect="@OnRowSelect" Style="@(IsVirtualizationAllowed() ? "height:285px" : "")" Density="@Density" IsLoading="@IsLoading" FirstPageTitle="@FirstPageTitle" FirstPageAriaLabel="@FirstPageAriaLabel" PrevPageAriaLabel="@PrevPageAriaLabel" PrevPageTitle="@PrevPageTitle" NextPageAriaLabel="@NextPageAriaLabel" NextPageTitle="@NextPageTitle" LastPageAriaLabel="@LastPageAriaLabel" LastPageTitle="@LastPageTitle" PageAriaLabelFormat="@PageAriaLabelFormat" PageTitleFormat="@PageTitleFormat">
                             <Columns>
                                 @if (Columns != null)
@@ -172,7 +172,7 @@
                     }
                     else
                     {
-                        <RadzenDataGrid EmptyTemplate=@EmptyTemplate FooterTemplate=@FooterTemplate AllowVirtualization="@IsVirtualizationAllowed()" VirtualizationOverscanCount="@GetVirtualizationOverscanCount()" AllowRowSelectOnRowClick="@AllowRowSelectOnRowClick" PagerHorizontalAlign="@PagerHorizontalAlign" PagerAlwaysVisible="@PagerAlwaysVisible" Responsive="@Responsive" AllowColumnResize="@AllowColumnResize" ColumnWidth="@ColumnWidth" EmptyText="@EmptyText" @ref="grid" Data="@(LoadData.HasDelegate ? (Data != null ? Data.Cast<object>() : Enumerable.Empty<object>()) : pagedData)" Count="@(LoadData.HasDelegate ? Count : count)" LoadData="@OnLoadData"
+                        <RadzenDataGrid GridLines=@GridLines EmptyTemplate=@EmptyTemplate FooterTemplate=@FooterTemplate AllowVirtualization="@IsVirtualizationAllowed()" VirtualizationOverscanCount="@GetVirtualizationOverscanCount()" AllowRowSelectOnRowClick="@AllowRowSelectOnRowClick" PagerHorizontalAlign="@PagerHorizontalAlign" PagerAlwaysVisible="@PagerAlwaysVisible" Responsive="@Responsive" AllowColumnResize="@AllowColumnResize" ColumnWidth="@ColumnWidth" EmptyText="@EmptyText" @ref="grid" Data="@(LoadData.HasDelegate ? (Data != null ? Data.Cast<object>() : Enumerable.Empty<object>()) : pagedData)" Count="@(LoadData.HasDelegate ? Count : count)" LoadData="@OnLoadData"
                                         TItem="object" CellRender="@OnCellRender" RowRender="@OnRowRender" ShowPagingSummary="@ShowPagingSummary" PagingSummaryFormat="@PagingSummaryFormat" PageSize="@PageSize" PageNumbersCount="@PageNumbersCount" AllowPaging="@(!IsVirtualizationAllowed())" AllowSorting="@AllowSorting" RowSelect="@OnRowSelect" Style="@(IsVirtualizationAllowed() ? "height:285px" : "")" Density="@Density" IsLoading="@IsLoading" FirstPageTitle="@FirstPageTitle" FirstPageAriaLabel="@FirstPageAriaLabel" PrevPageAriaLabel="@PrevPageAriaLabel" PrevPageTitle="@PrevPageTitle" NextPageAriaLabel="@NextPageAriaLabel" NextPageTitle="@NextPageTitle" LastPageAriaLabel="@LastPageAriaLabel" LastPageTitle="@LastPageTitle" PageAriaLabelFormat="@PageAriaLabelFormat" PageTitleFormat="@PageTitleFormat">
                             <Columns>
                                 <RadzenDataGridColumn TItem="object" Property="it" Title="Item" Type="typeof(string)">

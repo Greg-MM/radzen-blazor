@@ -53,7 +53,7 @@ namespace Radzen.Blazor
 
         protected virtual double CalculateTickCount(int distance)
         {
-            return Math.Ceiling(Math.Abs(Output.End - Output.Start) / distance);
+            return  Math.Max(1, Math.Ceiling(Math.Abs(Output.End - Output.Start) / distance));
         }
 
         public override (double Start, double End, double Step) Ticks(int distance)
@@ -113,12 +113,12 @@ namespace Radzen.Blazor
                 Round = false;
             }
 
-            if (step <= 0)
+            if (step == 0)
             {
-                throw new ArgumentOutOfRangeException("Step must be greater than zero");
+                throw new ArgumentOutOfRangeException("Step must be non-zero");
             }
 
-            return (start, end, step);
+            return (start, end, Math.Abs(step));
         }
     }
 }

@@ -204,6 +204,8 @@ namespace Radzen.Blazor
         {
             selectedIndex = SelectedIndex;
 
+            focusedIndex = focusedIndex == -1 ? 0 : focusedIndex;
+
             base.OnInitialized();
         }
 
@@ -280,7 +282,9 @@ namespace Radzen.Blazor
         {
             var key = args.Code != null ? args.Code : args.Key;
 
-            var item  = tabs.ElementAtOrDefault(focusedIndex) ?? tabs[0];
+            var item = tabs.ElementAtOrDefault(focusedIndex) ?? tabs.FirstOrDefault();
+
+            if (item == null) return;
 
             if (key == "ArrowLeft" || key == "ArrowRight")
             {

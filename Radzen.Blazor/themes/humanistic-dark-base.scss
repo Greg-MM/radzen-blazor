@@ -335,6 +335,9 @@ $slider-disabled-range-background-color: var(--rz-base-700) !default;
 $slider-disabled-range-border: var(--rz-border-base-700) !default;
 $slider-disabled-handle-background-color: var(--rz-base-700) !default;
 
+// Rating
+$rating-focus-color: var(--rz-text-secondary-color) !default;
+
 // Numeric
 $numeric-button-disabled-background-color: var(--rz-base-700) !default;
 
@@ -342,6 +345,9 @@ $numeric-button-disabled-background-color: var(--rz-base-700) !default;
 $datepicker-header-background-color: var(--rz-base-800) !default;
 $datepicker-calendar-border: var(--rz-border-base-700) !default;
 $timepicker-background-color: var(--rz-base-900) !default;
+
+// TimeSpanPicker
+$timespanpicker-panel-background-color: var(--rz-base-800) !default;
 
 // Upload
 $upload-button-bar-background-color: var(--rz-base-700) !default;
@@ -356,6 +362,8 @@ $grid-filter-background-color: var(--rz-base-800) !default;
 $grid-filter-buttons-background-color: var(--rz-base-800) !default;
 $grid-filter-color: var(--rz-text-secondary-color) !default;
 $grid-detail-template-background-color: var(--rz-base-900) !default;
+$grid-simple-filter-icon-active-color: var(--rz-on-secondary-dark) !default;
+$grid-simple-filter-icon-active-background-color: var(--rz-secondary-dark) !default;
 
 // Pager
 $pager-back-button-background-color: var(--rz-base-700) !default;

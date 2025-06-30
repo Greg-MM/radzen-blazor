@@ -130,7 +130,7 @@ namespace Radzen.Blazor
         {
             if (!firstRender)
             {
-                await JSRuntime.InvokeVoidAsync("Radzen.updateMap", UniqueID, Zoom, Center);
+                await JSRuntime.InvokeVoidAsync("Radzen.updateMap", UniqueID, ApiKey, Zoom, Center);
             }
         }
 
@@ -211,7 +211,7 @@ namespace Radzen.Blazor
             }
             else
             {
-                await JSRuntime.InvokeVoidAsync("Radzen.updateMap", UniqueID, null, null,
+                await JSRuntime.InvokeVoidAsync("Radzen.updateMap", UniqueID, ApiKey, null, null,
                              data.Select(m => new { Title = m.Title, Label = m.Label, Position = m.Position }), Options, FitBoundsToMarkersOnUpdate, Culture.TwoLetterISOLanguageName);
             }
         }
@@ -223,7 +223,7 @@ namespace Radzen.Blazor
 
             if (IsJSRuntimeAvailable)
             {
-                JSRuntime.InvokeVoidAsync("Radzen.destroyMap", UniqueID);
+                JSRuntime.InvokeVoid("Radzen.destroyMap", UniqueID);
             }
         }
     }

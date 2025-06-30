@@ -53,6 +53,9 @@ namespace Radzen.Blazor
         [Parameter]
         public EventCallback<LegendClickEventArgs> LegendClick { get; set; }
 
+        [Inject]
+        TooltipService TooltipService { get; set; }
+
         /// <summary>
         /// Gets the runtime width of the chart.
         /// </summary>
@@ -111,6 +114,11 @@ namespace Radzen.Blazor
         {
             Series.Remove(series);
         }
+        /// <summary>
+        /// Returns the Series used by the Chart.
+        /// </summary>
+        /// <returns></returns>
+        public IReadOnlyList<IChartSeries> GetSeries() => Series.ToList();
 
         /// <summary>
         /// Returns whether the chart should render axes.
@@ -276,7 +284,6 @@ namespace Radzen.Blazor
             }
         }
 
-        ChartTooltipContainer chartTooltipContainer;
         RenderFragment tooltip;
         object tooltipData;
         double mouseX;
@@ -367,11 +374,15 @@ namespace Radzen.Blazor
                     {
                         foreach (var overlay in series.Overlays.Reverse())
                         {
-                            if (overlay.Visible && overlay.Contains(mouseX - MarginLeft, mouseY - MarginTop, TooltipTolerance))
+                            if (overlay.Visible && overlay.Contains(queryX, queryY, TooltipTolerance))
                             {
                                 tooltipData = null;
-                                tooltip = overlay.RenderTooltip(mouseX, mouseY, MarginLeft, MarginTop);
-                                chartTooltipContainer.Refresh();
+                                tooltip = overlay.RenderTooltip(queryX, queryY);
+                                var tooltipPosition = overlay.GetTooltipPosition(queryX, queryY);
+                                TooltipService.OpenChartTooltip(Element, tooltipPosition.X + MarginLeft, tooltipPosition.Y + MarginTop, _ => tooltip, new ChartTooltipOptions
+                                {
+                                    ColorScheme = ColorScheme
+                                });
                                 await Task.Yield();
 
                                 return;
@@ -399,21 +410,45 @@ namespace Radzen.Blazor
                     if (closestSeriesData != tooltipData)
                     {
                         tooltipData = closestSeriesData;
-                        tooltip = closestSeries.RenderTooltip(closestSeriesData, MarginLeft, MarginTop, Height ?? 0);
-                        chartTooltipContainer.Refresh();
+                        tooltip = closestSeries.RenderTooltip(closestSeriesData);
+                        var tooltipPosition = closestSeries.GetTooltipPosition(closestSeriesData);
+                        TooltipService.OpenChartTooltip(Element, tooltipPosition.X + MarginLeft, tooltipPosition.Y + MarginTop, _ => tooltip, new ChartTooltipOptions
+                        {
+                            ColorScheme = ColorScheme
+                        });
                         await Task.Yield();
                     }
                     return;
                 }
+            }
 
-                if (tooltip != null)
-                {
-                    tooltipData = null;
-                    tooltip = null;
+            if (tooltip != null)
+            {
+                tooltipData = null;
+                tooltip = null;
 
-                    chartTooltipContainer.Refresh();
-                    await Task.Yield();
-                }
+                TooltipService.Close();
+                await Task.Yield();
+            }
+        }
+
+        /// <summary>
+        /// Displays a Tooltip on a chart without user interaction, given a series, and the data associated with it.
+        /// </summary>
+        /// <param name="series"></param>
+        /// <param name="data"></param>
+        /// <exception cref="ArgumentException"></exception>
+        public async Task DisplayTooltipFor(IChartSeries series, object data)
+        {
+            if (!Series.Contains(series))
+            {
+                throw new ArgumentException($"Series:{series.GetTitle()} does not exist in {nameof(this.Series)}");
+            }
+
+            if (IsJSRuntimeAvailable)
+            {
+                var point = series.GetTooltipPosition(data);
+                await MouseMove(point.X + MarginLeft, point.Y + MarginTop);
             }
         }
 
@@ -551,7 +586,7 @@ namespace Radzen.Blazor
 
             if (Visible && IsJSRuntimeAvailable)
             {
-                JSRuntime.InvokeVoidAsync("Radzen.destroyChart", Element);
+                JSRuntime.InvokeVoid("Radzen.destroyChart", Element);
             }
         }
 

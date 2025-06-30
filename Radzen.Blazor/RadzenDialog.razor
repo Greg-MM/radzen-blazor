@@ -19,7 +19,7 @@
         @if (sideDialogOptions.ShowTitle)
         {
             <div class="rz-dialog-side-titlebar">
-                <div class="rz-dialog-side-title" style="display: inline" id="rz-dialog-side-label">@((MarkupString)sideDialogOptions.Title)</div>
+                <div class="rz-dialog-side-title" style="display: inline" id="rz-dialog-side-label">@sideDialogOptions.Title</div>
                 @if (sideDialogOptions.ShowClose)
                 {
                     <a id="@(sideDialogOptions.GetHashCode() + "cl")" aria-label="@CloseSideDialogAriaLabel" @onclick:preventDefault="true" class="rz-dialog-side-titlebar-close" @onclick="@(_ => Service.CloseSide(null))" role="button" tabindex="@sideDialogOptions.CloseTabIndex">
@@ -28,7 +28,7 @@
                 }
             </div>
         }
-        <div class="rz-dialog-side-content" style="@sideDialogOptions.Style">
+        <div class="@SideDialogContentCssClass" style="@sideDialogOptions.Style">
             @sideDialogContent
         </div>
     </aside>
@@ -46,6 +46,15 @@
 }
 
 @code {
+    string SideDialogContentCssClass
+    {
+        get
+        {
+            var baseCss = "rz-dialog-side-content";
+            return string.IsNullOrEmpty(sideDialogOptions.ContentCssClass) ? baseCss : $"{baseCss} {sideDialogOptions.ContentCssClass}";
+        }
+
+    }
     [Inject] 
     DialogService Service { get; set; }
 
@@ -117,10 +126,30 @@
         StateHasChanged();
     }
 
+    bool sideDialogClosing = false;
+
+    async Task OnSideCloseAsync()
+    {
+        sideDialogClosing = true;
+
+        StateHasChanged();
+
+        await Task.Delay(300);
+
+        isSideDialogOpen = false;
+        sideDialogClosing = false;
+
+        StateHasChanged();
+
+        Service.OnSideCloseComplete();
+    }
+
     void OnSideClose(dynamic _)
     {
-        isSideDialogOpen = false;
-        StateHasChanged();
+        if (isSideDialogOpen)
+        {
+            InvokeAsync(OnSideCloseAsync);
+        }
     }
 
     void OnOpen(string title, Type type, Dictionary<string, object> parameters, DialogOptions options)
@@ -133,10 +162,12 @@
         Close(result).ConfigureAwait(false);
     }
 
-    string GetSideDialogCssClass()
-    {
-        return $"rz-dialog-side rz-dialog-side-position-{sideDialogOptions.Position.ToString().ToLower()} {sideDialogOptions.CssClass}";
-    }
+    string GetSideDialogCssClass() => ClassList.Create("rz-dialog-side")
+                                               .Add($"rz-dialog-side-position-{sideDialogOptions.Position.ToString().ToLower()}")
+                                               .Add(sideDialogOptions.CssClass)
+                                               .Add("rz-open", !sideDialogClosing)
+                                               .Add("rz-close", sideDialogClosing)
+                                               .ToString();
 
     string GetSideDialogStyle()
     {

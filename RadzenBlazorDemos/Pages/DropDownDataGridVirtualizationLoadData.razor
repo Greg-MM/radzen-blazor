@@ -33,6 +33,11 @@
             query = query.Where(c => c.CustomerID.ToLower().Contains(args.Filter.ToLower()) || c.ContactName.ToLower().Contains(args.Filter.ToLower()) || c.CompanyName.ToLower().Contains(args.Filter.ToLower()));
         }
 
+        if (!string.IsNullOrEmpty(args.OrderBy))
+        {
+            query = query.OrderBy(args.OrderBy);
+        }
+
         count = await Task.FromResult(query.Count());
 
         customers = await Task.FromResult(query.Skip(args.Skip.HasValue ? args.Skip.Value : 0).Take(args.Top.HasValue ? args.Top.Value : 10).ToList());

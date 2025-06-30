@@ -1,5 +1,4 @@
-﻿@using System.Linq.Dynamic.Core
-@using RadzenBlazorDemos.Data
+﻿@using RadzenBlazorDemos.Data
 @using RadzenBlazorDemos.Models.Northwind
 
 @inherits DbContextPage
@@ -55,7 +54,7 @@ void LoadData(LoadDataArgs args)
 
     if (!string.IsNullOrEmpty(args.Filter))
     {
-        query = query.Where(args.Filter);
+        query = query.Where(grid.ColumnsCollection);
     }
 
     if (!string.IsNullOrEmpty(args.OrderBy))
@@ -103,13 +102,17 @@ void LoadData(LoadDataArgs args)
 
         await Task.Yield();
 
-        // This demo is using https://dynamic-linq.net
         var query = dbContext.Employees.AsQueryable();
 
         if (!string.IsNullOrEmpty(args.Filter))
         {
+            // Query cannot be transalated to SQL and filtering will be performed in-memory.
+            if (selectedTitles?.Any() == true)
+            {
+                query = query.ToList().AsQueryable();
+            }
             // Filter via the Where method
-            query = query.Where(args.Filter);
+            query = query.Where(grid.ColumnsCollection);
         }
 
         if (!string.IsNullOrEmpty(args.OrderBy))

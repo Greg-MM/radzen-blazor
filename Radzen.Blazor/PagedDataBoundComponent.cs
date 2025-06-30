@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Linq;
-using System.Linq.Dynamic.Core;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Components;
 using Radzen.Blazor;
@@ -191,8 +190,20 @@ namespace Radzen
         /// Gets or sets the pager summary format.
         /// </summary>
         /// <value>The pager summary format.</value>
+        /// <remarks>
+        /// <see cref="PagingSummaryTemplate" /> has preference
+        /// </remarks>
         [Parameter]
         public string PagingSummaryFormat { get; set; } = "Page {0} of {1} ({2} items)";
+
+#nullable enable
+        /// <summary>
+        /// Gets or sets the pager summary template.
+        /// </summary>
+        /// <remarks>Has preference over <see cref="PagingSummaryFormat" /></remarks>
+        [Parameter]
+        public RenderFragment<PagingInformation>? PagingSummaryTemplate { get; set; }
+#nullable restore
 
         /// <summary>
         /// Gets or sets the pager's first page button's title attribute.
@@ -354,18 +365,18 @@ namespace Radzen
         /// Called when [parameters set asynchronous].
         /// </summary>
         /// <returns>Task.</returns>
-        protected override Task OnParametersSetAsync()
+        protected override async Task OnParametersSetAsync()
         {
             if (Visible && !LoadData.HasDelegate)
             {
-                InvokeAsync(Reload);
+                await InvokeAsync(Reload);
             }
             else
             {
                 CalculatePager();
             }
 
-            return base.OnParametersSetAsync();
+            await base.OnParametersSetAsync();
         }
 
         /// <summary>
